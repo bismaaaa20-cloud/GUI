@@ -1,4 +1,4 @@
---// MouseUI v1.0 | UI library universal (gaya redz Hub / Banana Cat Hub)
+--// MouseUI v1.1 | UI library universal (gaya redz Hub / Banana Cat Hub)
 --// Simpan sebagai MouseUI.lua di GitHub, muat lewat loadstring(game:HttpGet(URL))()
 
 local Players = game:GetService("Players")
@@ -9,7 +9,7 @@ local HttpService = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
 
-local Library = { Version = "1.0.0", Windows = {} }
+local Library = { Version = "1.1.0", Windows = {} }
 
 local Theme = {
 	Background = Color3.fromRGB(22, 22, 26),
@@ -22,6 +22,7 @@ local Theme = {
 	Stroke = Color3.fromRGB(58, 58, 68),
 }
 Library.Theme = Theme -- ubah sebelum CreateWindow kalau mau ganti warna
+Library.DefaultIcon = 90803590596423 -- logo pedang biru-merah
 
 local SCALES = { Small = 0.8, Medium = 1, Large = 1.2 }
 local FONT = {
@@ -191,6 +192,11 @@ function Library:CreateWindow(opts)
 		self._folder = tostring(opts.ConfigFolder)
 	end
 
+	local icon = opts.Icon
+	if icon == nil then
+		icon = Library.DefaultIcon
+	end
+
 	local parent = GetGuiParent()
 	local guiName = "MouseUI_" .. self.Title
 	local old = parent:FindFirstChild(guiName)
@@ -354,24 +360,31 @@ function Library:CreateWindow(opts)
 	--// Floating icon (buka/tutup UI)
 	local iconBtn = New("TextButton", {
 		Name = "ToggleIcon",
-		Size = UDim2.fromOffset(46, 46),
-		Position = UDim2.new(0.5, -23, 0, 14),
-		BackgroundColor3 = Theme.Background,
+		Size = UDim2.fromOffset(50, 50),
+		Position = UDim2.new(0.5, -25, 0, 14),
+		BackgroundColor3 = Color3.fromRGB(0, 0, 0),
 		AutoButtonColor = false,
-		Text = opts.Icon and "" or "M",
+		Text = icon and "" or "M",
 		Font = FONT.Bold,
 		TextSize = 20,
 		TextColor3 = Theme.Text,
+		ClipsDescendants = true,
 		Parent = gui,
 	}, {
 		Corner(0, 1),
-		New("UIStroke", { Color = Theme.Accent, Thickness = 2 }),
+		New("UIStroke", { Color = Color3.new(1, 1, 1), Thickness = 2 }, {
+			New("UIGradient", {
+				Color = ColorSequence.new(Color3.fromRGB(60, 110, 255), Color3.fromRGB(255, 50, 80)),
+				Rotation = 0,
+			}),
+		}),
 	})
-	if opts.Icon then
+	if icon then
 		New("ImageLabel", {
 			BackgroundTransparency = 1,
 			Size = UDim2.fromScale(1, 1),
-			Image = ToAsset(opts.Icon),
+			Image = ToAsset(icon),
+			ScaleType = Enum.ScaleType.Crop,
 			Parent = iconBtn,
 		}, { Corner(0, 1) })
 	end
