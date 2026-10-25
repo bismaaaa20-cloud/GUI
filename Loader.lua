@@ -1,3 +1,6 @@
+--// XevoraHub Loader | satu link untuk semua game
+--// Alur: baca GameId/PlaceId -> cari di Games.lua -> (cek key) -> jalankan script game itu.
+
 local CONFIG = {
 	Registry = "https://raw.githubusercontent.com/bismaaaa20-cloud/GUI/refs/heads/main/Games.lua",
 	UI = "https://raw.githubusercontent.com/bismaaaa20-cloud/GUI/refs/heads/main/Main%20UI",
@@ -7,9 +10,9 @@ local env = (getgenv and getgenv()) or _G
 local StarterGui = game:GetService("StarterGui")
 
 local function notify(text)
-	warn("[Mouse Hub] " .. text)
+	warn("[XevoraHub] " .. text)
 	pcall(function()
-		StarterGui:SetCore("SendNotification", { Title = "Mouse Hub", Text = text, Duration = 6 })
+		StarterGui:SetCore("SendNotification", { Title = "XevoraHub", Text = text, Duration = 6 })
 	end)
 end
 
@@ -32,7 +35,7 @@ local function loadRemote(url, label)
 	return true, result
 end
 
-if env.MouseHubLoaded then
+if env.XevoraHubLoaded then
 	notify("Sudah berjalan di game ini")
 	return
 end
@@ -47,8 +50,8 @@ end
 
 local entry = games[gameId] or games[placeId]
 if not entry then
-	local line = string.format('[%d] = { Name = "%s", Script = RAW .. "games/NamaFile.lua" },', gameId, "Nama Game")
-	print("[Mouse Hub] Game belum terdaftar. GameId = " .. gameId .. ", PlaceId = " .. placeId)
+	local line = string.format('[%d] = { Name = "Nama Game", Script = RAW .. "games/NamaFile.lua" },', gameId)
+	print("[XevoraHub] Game belum terdaftar. GameId = " .. gameId .. ", PlaceId = " .. placeId)
 	print(line)
 	if setclipboard then
 		pcall(setclipboard, line)
@@ -65,17 +68,17 @@ if not passKey(entry) then
 	return
 end
 
-env.MouseHub = {
+env.XevoraHub = {
 	Name = entry.Name,
 	GameId = gameId,
 	PlaceId = placeId,
 	UIUrl = CONFIG.UI,
 }
-env.MouseHubLoaded = true
+env.XevoraHubLoaded = true
 
 notify("Memuat " .. entry.Name .. "...")
 local okGame, err = loadRemote(entry.Script, entry.Name)
 if not okGame then
-	env.MouseHubLoaded = nil
+	env.XevoraHubLoaded = nil
 	notify(err)
 end
