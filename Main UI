@@ -1,4 +1,4 @@
---// MouseUI v2.2 | UI library universal, desain "premium dark gaming"
+--// MouseUI v2.3 | UI library universal, desain "premium dark gaming"
 --// Muat lewat: loadstring(game:HttpGet(URL))()
 --// API sama dengan v1.x (CreateWindow / AddTab / AddSection / AddToggle / AddSlider /
 --// AddDropdown / AddInput / AddButton / AddLabel / Notify), jadi script lama tetap jalan.
@@ -14,10 +14,11 @@ local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local CoreGui = game:GetService("CoreGui")
 local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 
-local Library = { Version = "2.2.0", Windows = {} }
+local Library = { Version = "2.3.0", Windows = {} }
 
 --// ===== 1. Theme & konfigurasi =====
 
@@ -50,6 +51,12 @@ Library.CardTransparency = 0.32 -- kartu: sidebar, baris fitur
 Library.FieldTransparency = 0.42 -- kolom: search, input, kotak dropdown, profil
 Library.IconSize = 60 -- diameter tombol logo bulat (piksel)
 Library.IconZoom = 1.25 -- pembesaran gambar di dalam lingkaran (1 = apa adanya)
+
+-- RGB berjalan lewat TweenService (diproses engine, tanpa loop Lua per frame) dan
+-- otomatis berhenti saat panel disembunyikan.
+Library.RGB = true -- garis tepi, cincin logo, garis header berputar warna pelangi
+Library.RGBControls = true -- toggle aktif, slider, indikator tab ikut RGB
+Library.Performance = "Auto" -- "Auto" (deteksi FPS) / "High" / "Low" (HP kentang)
 
 -- Ukuran dasar panel. Skala akhir = menyesuaikan layar x pengali (Small/Medium/Large).
 local WIN_W, WIN_H = 620, 360
@@ -128,7 +135,25 @@ local function GradStroke(thickness, rotation, transparency)
 	}, { Gradient(rotation or 0) })
 end
 
+-- Mode hemat (HP kentang): semua animasi UI dimatikan (nilai langsung diterapkan).
+local PERF = { low = false }
+local NoTween = { Play = function() end, Cancel = function() end, Pause = function() end }
+
+local function RainbowSeq()
+	local keys = {}
+	for i = 0, 6 do
+		table.insert(keys, ColorSequenceKeypoint.new(i / 6, Color3.fromHSV((i % 6) / 6, 0.7, 1)))
+	end
+	return ColorSequence.new(keys)
+end
+
 local function Tween(inst, time, props, style)
+	if PERF.low then
+		for k, v in pairs(props) do
+			inst[k] = v
+		end
+		return NoTween
+	end
 	local tw = TweenService:Create(
 		inst,
 		TweenInfo.new(time, style or Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
@@ -311,6 +336,13 @@ function Library:CreateWindow(opts)
 	self._activeTab = nil
 	self._visible = true
 	self._mult = 1
+	self._rgbList = {}
+	self._rgbOn = false
+	self._strokes = {}
+	self._shadows = {}
+	self._low = false
+	self._perfMode = tostring(opts.Performance or Library.Performance)
+	self._rgbWanted = opts.RGB ~= false and Library.RGB ~= false
 	self._targetScale = 1
 	self._folder = "MouseUI/" .. self.Title:gsub("[^%w_%-]", "_")
 	if opts.ConfigFolder then
@@ -374,7 +406,7 @@ function Library:CreateWindow(opts)
 	self._scale = New("UIScale", { Scale = 1, Parent = root })
 
 	for _, sh in ipairs({ { 18, 0.9, 6 }, { 8, 0.8, 3 } }) do
-		New("Frame", {
+		table.insert(self._shadows, New("Frame", {
 			AnchorPoint = Vector2.new(0.5, 0.5),
 			Position = UDim2.new(0.5, 0, 0.5, sh[3]),
 			Size = UDim2.fromScale(1, 1),
@@ -384,7 +416,7 @@ function Library:CreateWindow(opts)
 		}, {
 			Corner(16),
 			New("UIStroke", { Color = Color3.new(0, 0, 0), Thickness = sh[1], Transparency = sh[2] }),
-		})
+		}))
 	end
 
 	local main = New("Frame", {
@@ -397,7 +429,7 @@ function Library:CreateWindow(opts)
 		Parent = root,
 	}, {
 		Corner(16),
-		GradStroke(1.2, 45, 0.4),
+		self:_regStroke(GradStroke(1.2, 45, 0.4)),
 	})
 	self.Main = main
 
@@ -422,7 +454,7 @@ function Library:CreateWindow(opts)
 			Image = iconAsset,
 			ScaleType = Enum.ScaleType.Crop,
 			Parent = header,
-		}, { Corner(0, 1), GradStroke(1.5, 45) })
+		}, { Corner(0, 1), self:_regStroke(GradStroke(1.5, 45)) })
 	end
 
 	local titleText = self.Title
@@ -494,7 +526,7 @@ function Library:CreateWindow(opts)
 		BackgroundColor3 = Color3.new(1, 1, 1),
 		BorderSizePixel = 0,
 		Parent = main,
-	}, { Gradient(0, true) })
+	}, { self:_regGrad(Gradient(0), "slide") })
 
 	--// Sidebar (kartu melayang)
 	local sidebar = New("Frame", {
@@ -564,7 +596,7 @@ function Library:CreateWindow(opts)
 		BackgroundColor3 = Theme.Background,
 		Image = string.format("rbxthumb://type=AvatarHeadShot&id=%d&w=150&h=150", LocalPlayer.UserId),
 		Parent = profile,
-	}, { Corner(0, 1), GradStroke(1.5, 45) })
+	}, { Corner(0, 1), self:_regStroke(GradStroke(1.5, 45)) })
 	New("TextLabel", {
 		BackgroundTransparency = 1,
 		Position = UDim2.fromOffset(52, 8),
@@ -635,7 +667,7 @@ function Library:CreateWindow(opts)
 		Parent = gui,
 	}, {
 		Corner(0, 1),
-		GradStroke(2.5, 45),
+		self:_regStroke(GradStroke(2.5, 45)),
 	})
 	if iconAsset then
 		local zoom = math.clamp(opts.IconZoom or Library.IconZoom, 1, 2)
@@ -678,6 +710,14 @@ function Library:CreateWindow(opts)
 	end
 
 	table.insert(Library.Windows, self)
+
+	self._rgbOn = self._rgbWanted
+	self:_syncAll()
+	if self._perfMode == "Low" then
+		self:_applyPerf(true)
+	elseif self._perfMode == "Auto" then
+		self:_probeFPS()
+	end
 	return self
 end
 
@@ -704,6 +744,151 @@ function Window:SetScale(v)
 	end
 end
 
+--// RGB & performa
+
+-- Mendaftarkan UIGradient agar berputar warna pelangi (kind: "rotate" atau "slide").
+function Window:_reg(grad, active, kind)
+	local e = {
+		grad = grad,
+		kind = kind or "rotate",
+		base = grad.Rotation,
+		static = grad.Color,
+		active = active ~= false,
+		tween = nil,
+	}
+	table.insert(self._rgbList, e)
+	task.defer(function()
+		if self.Gui then
+			self:_syncRGB(e)
+		end
+	end)
+	return e
+end
+
+function Window:_regGrad(grad, kind)
+	self:_reg(grad, true, kind)
+	return grad
+end
+
+function Window:_regStroke(stroke)
+	local grad = stroke:FindFirstChildOfClass("UIGradient")
+	if grad then
+		self:_reg(grad, true, "rotate")
+	end
+	return stroke
+end
+
+-- Kontrol (toggle, slider, indikator tab) ikut RGB hanya bila Library.RGBControls aktif.
+function Window:_regControl(grad, active)
+	if Library.RGBControls == false then
+		return nil
+	end
+	return self:_reg(grad, active, "rotate")
+end
+
+function Window:_syncRGB(e)
+	if e.tween then
+		e.tween:Cancel()
+		e.tween = nil
+	end
+	if self._rgbOn and e.active and self._visible and e.grad.Parent then
+		e.grad.Color = RainbowSeq()
+		if e.kind == "slide" then
+			e.grad.Offset = Vector2.new(-1, 0)
+			e.tween = TweenService:Create(
+				e.grad,
+				TweenInfo.new(3, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+				{ Offset = Vector2.new(1, 0) }
+			)
+		else
+			e.grad.Rotation = e.base
+			e.tween = TweenService:Create(
+				e.grad,
+				TweenInfo.new(6, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1),
+				{ Rotation = e.base + 360 }
+			)
+		end
+		e.tween:Play()
+	else
+		e.grad.Color = e.static
+		e.grad.Rotation = e.base
+		e.grad.Offset = Vector2.new(0, 0)
+	end
+end
+
+function Window:_syncAll()
+	for _, e in ipairs(self._rgbList) do
+		self:_syncRGB(e)
+	end
+end
+
+function Window:SetRGB(on)
+	self._rgbWanted = on and true or false
+	self._rgbOn = self._rgbWanted and not self._low
+	self:_syncAll()
+end
+
+-- mode: "Auto" (deteksi FPS) / "High" / "Low" (HP kentang: tanpa RGB, animasi, bayangan, garis tipis)
+function Window:SetPerformance(mode)
+	mode = tostring(mode or "Auto")
+	self._perfMode = mode
+	if mode == "Auto" then
+		self:_probeFPS()
+	else
+		self:_applyPerf(mode == "Low")
+	end
+end
+
+function Window:_applyPerf(low)
+	self._low = low
+	PERF.low = low
+	self._rgbOn = self._rgbWanted and not low
+	for _, sh in ipairs(self._shadows) do
+		sh.Visible = not low
+	end
+	for _, st in ipairs(self._strokes) do
+		st.Enabled = not low
+	end
+	self:_syncAll()
+end
+
+-- Ukur FPS ~1,5 detik; di bawah 32 FPS otomatis masuk mode hemat.
+function Window:_probeFPS()
+	if self._probing then
+		return
+	end
+	self._probing = true
+	task.spawn(function()
+		task.wait(1)
+		local frames = 0
+		local t0 = os.clock()
+		local conn = RunService.Heartbeat:Connect(function()
+			frames += 1
+		end)
+		task.wait(1.5)
+		conn:Disconnect()
+		self._probing = false
+		if not self.Gui then
+			return
+		end
+		local fps = frames / math.max(os.clock() - t0, 0.1)
+		self.FPS = fps
+		if self._perfMode == "Auto" then
+			local low = fps < 32
+			if low ~= self._low then
+				self:_applyPerf(low)
+				if low then
+					self:Notify({
+						Title = "Mode hemat aktif",
+						Content = string.format("FPS rendah (%d). Efek berat dimatikan.", math.floor(fps)),
+						Duration = 4,
+					})
+				end
+			end
+		end
+	end)
+end
+
 -- Buka/tutup dengan animasi skala singkat.
 function Window:Toggle(state)
 	if state == nil then
@@ -713,6 +898,7 @@ function Window:Toggle(state)
 		return
 	end
 	self._visible = state
+	self:_syncAll()
 	if not state and self._closePopup then
 		self._closePopup()
 	end
@@ -732,6 +918,12 @@ function Window:Toggle(state)
 end
 
 function Window:Destroy()
+	for _, e in ipairs(self._rgbList) do
+		if e.tween then
+			e.tween:Cancel()
+		end
+	end
+	self._rgbList = {}
 	for _, conn in ipairs(self._conns) do
 		pcall(function()
 			conn:Disconnect()
@@ -747,6 +939,9 @@ function Window:Destroy()
 			table.remove(Library.Windows, i)
 			break
 		end
+	end
+	if #Library.Windows == 0 then
+		PERF.low = false
 	end
 end
 
@@ -887,6 +1082,10 @@ function Window:_select(tab)
 		t.Page.Visible = active
 		Tween(t.Button, 0.15, { BackgroundTransparency = active and activeT or 1 })
 		t._indicator.Visible = active
+		if t._rgbEntry then
+			t._rgbEntry.active = active
+			self:_syncRGB(t._rgbEntry)
+		end
 		t._label.TextColor3 = active and Theme.Text or Theme.SubText
 		t._badgeGrad.Enabled = active
 		t._badge.BackgroundColor3 = active and Color3.new(1, 1, 1) or Theme.Secondary
@@ -927,6 +1126,8 @@ function Window:AddTab(opts)
 		Parent = self._tabList,
 	}, { Corner(10) })
 
+	local indicatorGrad = Accent(90)
+	tab._rgbEntry = self:_regControl(indicatorGrad, false)
 	tab._indicator = New("Frame", {
 		AnchorPoint = Vector2.new(0, 0.5),
 		Position = UDim2.new(0, 0, 0.5, 0),
@@ -935,7 +1136,7 @@ function Window:AddTab(opts)
 		BorderSizePixel = 0,
 		Visible = false,
 		Parent = tab.Button,
-	}, { Corner(2), Accent(90) })
+	}, { Corner(2), indicatorGrad })
 
 	-- Lencana ikon: hanya tampil kalau Icon diberikan; tanpa Icon tab berupa teks saja
 	tab._badge = New("Frame", {
@@ -1015,6 +1216,9 @@ end
 --// ===== 4. Tab + komponen =====
 
 function Tab:_row(height, searchText)
+	local rowStroke = Stroke(Theme.Glow, 1, 0.72)
+	table.insert(self.Window._strokes, rowStroke)
+	rowStroke.Enabled = not self.Window._low
 	local row = New("Frame", {
 		Size = UDim2.new(1, 0, 0, height),
 		BackgroundColor3 = Theme.Card,
@@ -1024,7 +1228,7 @@ function Tab:_row(height, searchText)
 		Parent = self.Page,
 	}, {
 		Corner(10),
-		Stroke(Theme.Glow, 1, 0.72),
+		rowStroke,
 	})
 	self._order += 1
 	table.insert(self._items, {
@@ -1186,6 +1390,7 @@ function Tab:AddToggle(o)
 	local switchGrad = Accent(0)
 	switchGrad.Enabled = false
 	switchGrad.Parent = switch
+	local rgbEntry = window:_regControl(switchGrad, false)
 	local knob = New("Frame", {
 		Position = UDim2.fromOffset(3, 3),
 		Size = UDim2.fromOffset(20, 20),
@@ -1206,6 +1411,10 @@ function Tab:AddToggle(o)
 		local pos = value and UDim2.fromOffset(23, 3) or UDim2.fromOffset(3, 3)
 		local col = value and Color3.new(1, 1, 1) or Theme.Off
 		switchGrad.Enabled = value
+		if rgbEntry then
+			rgbEntry.active = value
+			window:_syncRGB(rgbEntry)
+		end
 		if animate then
 			Tween(knob, 0.18, { Position = pos }, Enum.EasingStyle.Back)
 			Tween(switch, 0.16, { BackgroundColor3 = col })
@@ -1294,12 +1503,14 @@ function Tab:AddSlider(o)
 		BorderSizePixel = 0,
 		Parent = row,
 	}, { Corner(0, 1) })
+	local fillGrad = Accent(0)
+	window:_regControl(fillGrad, true)
 	local fill = New("Frame", {
 		Size = UDim2.fromScale(0, 1),
 		BackgroundColor3 = Color3.new(1, 1, 1),
 		BorderSizePixel = 0,
 		Parent = track,
-	}, { Corner(0, 1), Accent(0) })
+	}, { Corner(0, 1), fillGrad })
 	local thumb = New("Frame", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0, 0.5),
