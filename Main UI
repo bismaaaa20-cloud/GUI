@@ -1,6 +1,7 @@
---// MouseUI v1.2 | UI library universal (gaya redz Hub / Banana Cat Hub)
+--// MouseUI v1.3 | UI library universal (gaya redz Hub / Banana Cat Hub)
 --// Muat lewat: loadstring(game:HttpGet(URL))()
---// Perubahan v1.2: ikon dimuat dari file lokal -> URL -> ID asset (huruf "M" jadi cadangan).
+--// v1.3: tema neon biru-merah dari logo, gradasi di semua elemen,
+--//       ukuran panel menyesuaikan layar (mirip hub lain), logo kecil di bar judul.
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -10,17 +11,21 @@ local HttpService = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
 
-local Library = { Version = "1.2.0", Windows = {} }
+local Library = { Version = "1.3.0", Windows = {} }
 
 local Theme = {
-	Background = Color3.fromRGB(22, 22, 26),
-	Sidebar = Color3.fromRGB(28, 28, 33),
-	Element = Color3.fromRGB(36, 36, 42),
-	ElementHover = Color3.fromRGB(50, 50, 60),
-	Accent = Color3.fromRGB(88, 101, 242),
-	Text = Color3.fromRGB(236, 236, 242),
-	SubText = Color3.fromRGB(150, 150, 162),
-	Stroke = Color3.fromRGB(58, 58, 68),
+	Background = Color3.fromRGB(7, 7, 15),
+	BackgroundAlt = Color3.fromRGB(14, 12, 30),
+	Sidebar = Color3.fromRGB(10, 10, 21),
+	Element = Color3.fromRGB(17, 17, 33),
+	ElementHover = Color3.fromRGB(28, 28, 54),
+	Blue = Color3.fromRGB(50, 120, 255),
+	Purple = Color3.fromRGB(150, 70, 255),
+	Red = Color3.fromRGB(255, 45, 80),
+	Accent = Color3.fromRGB(50, 120, 255),
+	Text = Color3.fromRGB(238, 240, 255),
+	SubText = Color3.fromRGB(140, 146, 178),
+	Stroke = Color3.fromRGB(40, 40, 72),
 }
 Library.Theme = Theme -- ubah sebelum CreateWindow kalau mau ganti warna
 
@@ -29,7 +34,9 @@ Library.DefaultIconFile = nil -- contoh: "logo.png" (file di folder workspace ex
 Library.DefaultIconURL = "https://raw.githubusercontent.com/bismaaaa20-cloud/GUI/refs/heads/main/logo_decal_1024.jpg"
 Library.DefaultIcon = 90803590596423 -- ID asset logo pedang biru-merah (cadangan terakhir)
 
-local SCALES = { Small = 0.8, Medium = 1, Large = 1.2 }
+-- Ukuran dasar panel. Skala akhir = menyesuaikan layar x pengali (Small/Medium/Large).
+local WIN_W, WIN_H = 600, 340
+local SCALES = { Small = 0.85, Medium = 1, Large = 1.2 }
 local FONT = {
 	Regular = Enum.Font.Gotham,
 	Medium = Enum.Font.GothamMedium,
@@ -65,6 +72,30 @@ local function Pad(l, t, r, b)
 		PaddingRight = UDim.new(0, r),
 		PaddingBottom = UDim.new(0, b),
 	})
+end
+
+-- Gradasi biru -> ungu -> merah (sesuai logo). fade = true membuat ujung kanan memudar.
+local function Gradient(rotation, fade)
+	return New("UIGradient", {
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Theme.Blue),
+			ColorSequenceKeypoint.new(0.5, Theme.Purple),
+			ColorSequenceKeypoint.new(1, Theme.Red),
+		}),
+		Transparency = fade and NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0),
+			NumberSequenceKeypoint.new(1, 0.85),
+		}) or NumberSequence.new(0),
+		Rotation = rotation or 0,
+	})
+end
+
+local function GradStroke(thickness, rotation, transparency)
+	return New("UIStroke", {
+		Color = Color3.new(1, 1, 1),
+		Thickness = thickness or 1,
+		Transparency = transparency or 0,
+	}, { Gradient(rotation or 0) })
 end
 
 local function Tween(inst, time, props)
@@ -156,6 +187,13 @@ local function GetGuiParent()
 	return LocalPlayer:WaitForChild("PlayerGui")
 end
 
+-- Skala otomatis: panel memakai ~62% lebar dan ~82% tinggi layar (seperti hub lain), maksimal 1.25x.
+local function GetFit()
+	local cam = workspace.CurrentCamera
+	local vp = cam and cam.ViewportSize or Vector2.new(800, 400)
+	return math.min(vp.X * 0.62 / WIN_W, vp.Y * 0.82 / WIN_H, 1.25)
+end
+
 local function MakeDraggable(handle, target, track, onClick, getScale)
 	local dragging, dragStart, startPos, dragInput = false, nil, nil, nil
 	local moved = 0
@@ -225,6 +263,7 @@ function Library:CreateWindow(opts)
 	self._setters = {}
 	self._activeTab = nil
 	self._visible = true
+	self._mult = 1
 	self._folder = "MouseUI/" .. self.Title:gsub("[^%w_%-]", "_")
 	if opts.ConfigFolder then
 		self._folder = tostring(opts.ConfigFolder)
@@ -234,6 +273,15 @@ function Library:CreateWindow(opts)
 	local icon = opts.Icon
 	if icon == nil then
 		icon = Library.DefaultIcon
+	end
+	local iconAsset, iconSource = nil, "none"
+	if icon then
+		iconAsset, iconSource = ResolveIcon(
+			icon,
+			opts.IconFile or Library.DefaultIconFile,
+			opts.IconURL or Library.DefaultIconURL
+		)
+		self.IconSource = iconSource
 	end
 
 	local parent = GetGuiParent()
@@ -256,19 +304,23 @@ function Library:CreateWindow(opts)
 	gui.Parent = parent
 	self.Gui = gui
 
-	--// Main frame
+	--// Main frame (latar gradasi gelap + garis tepi neon)
 	local main = New("Frame", {
 		Name = "Main",
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.new(0.5, 0, 0.5, 0),
-		Size = UDim2.fromOffset(560, 320),
-		BackgroundColor3 = Theme.Background,
+		Size = UDim2.fromOffset(WIN_W, WIN_H),
+		BackgroundColor3 = Color3.new(1, 1, 1),
 		BorderSizePixel = 0,
 		ClipsDescendants = true,
 		Parent = gui,
 	}, {
-		Corner(8),
-		New("UIStroke", { Color = Theme.Stroke, Thickness = 1 }),
+		Corner(10),
+		GradStroke(1.5, 45),
+		New("UIGradient", {
+			Color = ColorSequence.new(Theme.BackgroundAlt, Theme.Background),
+			Rotation = 90,
+		}),
 	})
 	self.Main = main
 
@@ -278,26 +330,41 @@ function Library:CreateWindow(opts)
 	--// Top bar
 	local top = New("Frame", {
 		Name = "TopBar",
-		Size = UDim2.new(1, 0, 0, 40),
-		BackgroundColor3 = Theme.Background,
+		Size = UDim2.new(1, 0, 0, 44),
+		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		Parent = main,
 	})
+
+	-- Logo kecil di kiri bar judul
+	local titleX = 16
+	if iconAsset then
+		titleX = 56
+		New("ImageLabel", {
+			AnchorPoint = Vector2.new(0, 0.5),
+			Position = UDim2.new(0, 12, 0.5, 0),
+			Size = UDim2.fromOffset(32, 32),
+			BackgroundColor3 = Color3.new(0, 0, 0),
+			Image = iconAsset,
+			ScaleType = Enum.ScaleType.Crop,
+			Parent = top,
+		}, { Corner(0, 1), GradStroke(1.5, 45) })
+	end
 
 	local titleText = self.Title
 	if opts.SubTitle then
 		titleText = titleText .. " : " .. tostring(opts.SubTitle)
 	end
 	if opts.Author then
-		titleText = titleText .. ' <font size="11" color="rgb(150,150,162)">by ' .. tostring(opts.Author) .. "</font>"
+		titleText = titleText .. ' <font size="11" color="rgb(140,146,178)">by ' .. tostring(opts.Author) .. "</font>"
 	end
 
 	New("TextLabel", {
 		BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(14, 0),
-		Size = UDim2.new(1, -110, 1, 0),
-		Font = FONT.Medium,
-		TextSize = 14,
+		Position = UDim2.fromOffset(titleX, 0),
+		Size = UDim2.new(1, -(titleX + 90), 1, 0),
+		Font = FONT.Bold,
+		TextSize = 15,
 		TextColor3 = Theme.Text,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd,
@@ -306,7 +373,7 @@ function Library:CreateWindow(opts)
 		Parent = top,
 	})
 
-	local function topButton(text, xOffset, callback)
+	local function topButton(text, xOffset, hoverColor, callback)
 		local b = New("TextButton", {
 			AnchorPoint = Vector2.new(1, 0.5),
 			Position = UDim2.new(1, xOffset, 0.5, 0),
@@ -319,44 +386,71 @@ function Library:CreateWindow(opts)
 			AutoButtonColor = false,
 			Parent = top,
 		})
+		b.MouseEnter:Connect(function()
+			Tween(b, 0.12, { TextColor3 = hoverColor })
+		end)
+		b.MouseLeave:Connect(function()
+			Tween(b, 0.12, { TextColor3 = Theme.SubText })
+		end)
 		b.MouseButton1Click:Connect(callback)
 		return b
 	end
-	topButton("X", -8, function()
+	topButton("X", -10, Theme.Red, function()
 		self:Destroy()
 	end)
-	topButton("—", -40, function()
+	topButton("—", -44, Theme.Blue, function()
 		self:Toggle(false)
 	end)
+
+	-- Garis gradasi di bawah bar judul
+	New("Frame", {
+		Position = UDim2.fromOffset(0, 44),
+		Size = UDim2.new(1, 0, 0, 2),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		BorderSizePixel = 0,
+		Parent = main,
+	}, { Gradient(0) })
 
 	--// Sidebar
 	local sidebar = New("Frame", {
 		Name = "Sidebar",
-		Position = UDim2.fromOffset(0, 40),
-		Size = UDim2.new(0, 150, 1, -40),
+		Position = UDim2.fromOffset(0, 46),
+		Size = UDim2.new(0, 160, 1, -46),
 		BackgroundColor3 = Theme.Sidebar,
 		BorderSizePixel = 0,
 		Parent = main,
 	})
+	New("Frame", {
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, 0, 0, 0),
+		Size = UDim2.new(0, 1, 1, 0),
+		BackgroundColor3 = Theme.Stroke,
+		BorderSizePixel = 0,
+		Parent = sidebar,
+	})
 
 	self._searchBox = New("TextBox", {
-		Position = UDim2.fromOffset(8, 8),
-		Size = UDim2.new(1, -16, 0, 28),
+		Position = UDim2.fromOffset(10, 10),
+		Size = UDim2.new(1, -20, 0, 30),
 		BackgroundColor3 = Theme.Element,
 		PlaceholderText = "Search...",
 		PlaceholderColor3 = Theme.SubText,
 		Text = "",
 		ClearTextOnFocus = false,
 		Font = FONT.Regular,
-		TextSize = 12,
+		TextSize = 13,
 		TextColor3 = Theme.Text,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		Parent = sidebar,
-	}, { Corner(6), Pad(8, 0, 8, 0) })
+	}, {
+		Corner(8),
+		Pad(10, 0, 10, 0),
+		New("UIStroke", { Color = Theme.Stroke, Thickness = 1 }),
+	})
 
 	self._tabList = New("ScrollingFrame", {
-		Position = UDim2.fromOffset(0, 44),
-		Size = UDim2.new(1, 0, 1, -48),
+		Position = UDim2.fromOffset(0, 48),
+		Size = UDim2.new(1, -1, 1, -52),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		ScrollBarThickness = 0,
@@ -364,15 +458,15 @@ function Library:CreateWindow(opts)
 		AutomaticCanvasSize = Enum.AutomaticSize.Y,
 		Parent = sidebar,
 	}, {
-		New("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }),
-		Pad(8, 0, 8, 4),
+		New("UIListLayout", { Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder }),
+		Pad(10, 2, 10, 6),
 	})
 
 	--// Content
 	self._content = New("Frame", {
 		Name = "Content",
-		Position = UDim2.fromOffset(158, 46),
-		Size = UDim2.new(1, -166, 1, -54),
+		Position = UDim2.fromOffset(172, 56),
+		Size = UDim2.new(1, -182, 1, -64),
 		BackgroundTransparency = 1,
 		Parent = main,
 	})
@@ -388,7 +482,7 @@ function Library:CreateWindow(opts)
 		Name = "Notifications",
 		AnchorPoint = Vector2.new(1, 0),
 		Position = UDim2.new(1, -12, 0, 12),
-		Size = UDim2.new(0, 250, 1, -24),
+		Size = UDim2.new(0, 260, 1, -24),
 		BackgroundTransparency = 1,
 		Parent = gui,
 	}, {
@@ -399,8 +493,8 @@ function Library:CreateWindow(opts)
 	--// Floating icon (buka/tutup UI). Huruf "M" tetap ada di bawah gambar sebagai cadangan.
 	local iconBtn = New("TextButton", {
 		Name = "ToggleIcon",
-		Size = UDim2.fromOffset(50, 50),
-		Position = UDim2.new(0.5, -25, 0, 14),
+		Size = UDim2.fromOffset(52, 52),
+		Position = UDim2.new(0.5, -26, 0, 14),
 		BackgroundColor3 = Color3.fromRGB(0, 0, 0),
 		AutoButtonColor = false,
 		Text = "M",
@@ -411,30 +505,19 @@ function Library:CreateWindow(opts)
 		Parent = gui,
 	}, {
 		Corner(0, 1),
-		New("UIStroke", { Color = Color3.new(1, 1, 1), Thickness = 2 }, {
-			New("UIGradient", {
-				Color = ColorSequence.new(Color3.fromRGB(60, 110, 255), Color3.fromRGB(255, 50, 80)),
-				Rotation = 0,
-			}),
-		}),
+		GradStroke(2.5, 45),
 	})
-	if icon then
-		local asset, source = ResolveIcon(
-			icon,
-			opts.IconFile or Library.DefaultIconFile,
-			opts.IconURL or Library.DefaultIconURL
-		)
-		self.IconSource = source
+	if iconAsset then
 		local img = New("ImageLabel", {
 			BackgroundTransparency = 1,
 			Size = UDim2.fromScale(1, 1),
-			Image = asset,
+			Image = iconAsset,
 			ScaleType = Enum.ScaleType.Crop,
 			Parent = iconBtn,
 		}, { Corner(0, 1) })
 		task.delay(6, function()
 			if img.Parent and not img.IsLoaded then
-				warn("[MouseUI] gambar ikon belum termuat (sumber: " .. source .. "). Kalau 'id', kemungkinan itu ID decal.")
+				warn("[MouseUI] gambar ikon belum termuat (sumber: " .. iconSource .. "). Kalau 'id', kemungkinan itu ID decal.")
 			end
 		end)
 	end
@@ -473,11 +556,13 @@ function Window:_flag(flag, value)
 	end
 end
 
+-- v = "Small" / "Medium" / "Large" atau angka pengali. Skala akhir juga menyesuaikan layar.
 function Window:SetScale(v)
-	local s = type(v) == "number" and v or SCALES[v]
-	if s then
-		self._scale.Scale = math.clamp(s, 0.5, 2)
+	local mult = type(v) == "number" and v or SCALES[v]
+	if mult then
+		self._mult = mult
 	end
+	self._scale.Scale = math.clamp(GetFit() * self._mult, 0.45, 1.8)
 end
 
 function Window:Toggle(state)
@@ -518,9 +603,9 @@ function Window:Notify(o)
 		LayoutOrder = self._notifyOrder,
 		Parent = self._notifyHolder,
 	}, {
-		Corner(8),
-		New("UIStroke", { Color = Theme.Accent, Thickness = 1 }),
-		Pad(10, 8, 10, 8),
+		Corner(10),
+		GradStroke(1.5, 0),
+		Pad(12, 9, 12, 9),
 		New("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder }),
 	})
 	New("TextLabel", {
@@ -528,7 +613,7 @@ function Window:Notify(o)
 		AutomaticSize = Enum.AutomaticSize.Y,
 		BackgroundTransparency = 1,
 		Font = FONT.Bold,
-		TextSize = 13,
+		TextSize = 14,
 		TextColor3 = Theme.Text,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextWrapped = true,
@@ -602,7 +687,7 @@ function Window:_select(tab)
 		t._indicator.Visible = active
 		t._label.TextColor3 = active and Theme.Text or Theme.SubText
 		if t._icon then
-			t._icon.ImageColor3 = active and Theme.Accent or Theme.SubText
+			t._icon.ImageColor3 = active and Theme.Blue or Theme.SubText
 		end
 	end
 	self._activeTab = tab
@@ -624,29 +709,29 @@ function Window:AddTab(opts)
 	tab._order = 1
 
 	tab.Button = New("TextButton", {
-		Size = UDim2.new(1, 0, 0, 34),
-		BackgroundColor3 = Theme.Element,
+		Size = UDim2.new(1, 0, 0, 36),
+		BackgroundColor3 = Theme.ElementHover,
 		BackgroundTransparency = 1,
 		Text = "",
 		AutoButtonColor = false,
 		LayoutOrder = #self._tabs + 1,
 		Parent = self._tabList,
-	}, { Corner(6) })
+	}, { Corner(8) })
 
 	tab._indicator = New("Frame", {
 		AnchorPoint = Vector2.new(0, 0.5),
 		Position = UDim2.new(0, 0, 0.5, 0),
-		Size = UDim2.fromOffset(3, 18),
-		BackgroundColor3 = Theme.Accent,
+		Size = UDim2.fromOffset(4, 20),
+		BackgroundColor3 = Color3.new(1, 1, 1),
 		BorderSizePixel = 0,
 		Visible = false,
 		Parent = tab.Button,
-	}, { Corner(2) })
+	}, { Corner(2), Gradient(90) })
 
 	if opts.Icon then
 		tab._icon = New("ImageLabel", {
 			BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(12, 8),
+			Position = UDim2.fromOffset(14, 9),
 			Size = UDim2.fromOffset(18, 18),
 			Image = ToAsset(opts.Icon),
 			ImageColor3 = Theme.SubText,
@@ -656,10 +741,10 @@ function Window:AddTab(opts)
 
 	tab._label = New("TextLabel", {
 		BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(opts.Icon and 38 or 14, 0),
-		Size = UDim2.new(1, opts.Icon and -42 or -18, 1, 0),
+		Position = UDim2.fromOffset(opts.Icon and 40 or 16, 0),
+		Size = UDim2.new(1, opts.Icon and -44 or -20, 1, 0),
 		Font = FONT.Medium,
-		TextSize = 13,
+		TextSize = 14,
 		TextColor3 = Theme.SubText,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd,
@@ -672,15 +757,15 @@ function Window:AddTab(opts)
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		ScrollBarThickness = 3,
-		ScrollBarImageColor3 = Theme.Stroke,
+		ScrollBarImageColor3 = Theme.Blue,
 		CanvasSize = UDim2.new(),
 		AutomaticCanvasSize = Enum.AutomaticSize.Y,
 		ScrollingDirection = Enum.ScrollingDirection.Y,
 		Visible = false,
 		Parent = self._content,
 	}, {
-		New("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }),
-		Pad(0, 0, 6, 8),
+		New("UIListLayout", { Padding = UDim.new(0, 7), SortOrder = Enum.SortOrder.LayoutOrder }),
+		Pad(0, 0, 8, 10),
 	})
 
 	tab.Button.MouseButton1Click:Connect(function()
@@ -703,7 +788,10 @@ function Tab:_row(height, searchText)
 		BorderSizePixel = 0,
 		LayoutOrder = self._order,
 		Parent = self.Page,
-	}, { Corner(6) })
+	}, {
+		Corner(8),
+		New("UIStroke", { Color = Theme.Stroke, Thickness = 1, Transparency = 0.35 }),
+	})
 	self._order += 1
 	table.insert(self._items, {
 		Frame = row,
@@ -716,10 +804,10 @@ end
 function Tab:_title(row, name, desc, rightInset)
 	New("TextLabel", {
 		BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(12, desc and 6 or 0),
+		Position = UDim2.fromOffset(14, desc and 7 or 0),
 		Size = desc and UDim2.new(1, rightInset, 0, 18) or UDim2.new(1, rightInset, 1, 0),
 		Font = FONT.Medium,
-		TextSize = 13,
+		TextSize = 14,
 		TextColor3 = Theme.Text,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd,
@@ -729,7 +817,7 @@ function Tab:_title(row, name, desc, rightInset)
 	if desc then
 		New("TextLabel", {
 			BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(12, 25),
+			Position = UDim2.fromOffset(14, 26),
 			Size = UDim2.new(1, rightInset, 0, 16),
 			Font = FONT.Regular,
 			TextSize = 11,
@@ -762,29 +850,42 @@ end
 --// ===== Elements =====
 
 function Tab:AddSection(name)
-	local lbl = New("TextLabel", {
-		Size = UDim2.new(1, 0, 0, 28),
+	local holder = New("Frame", {
+		Size = UDim2.new(1, 0, 0, 34),
 		BackgroundTransparency = 1,
+		LayoutOrder = self._order,
+		Parent = self.Page,
+	})
+	New("TextLabel", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 1, -5),
 		Font = FONT.Bold,
-		TextSize = 16,
+		TextSize = 17,
 		TextColor3 = Theme.Text,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		Text = tostring(name),
-		LayoutOrder = self._order,
-		Parent = self.Page,
+		Parent = holder,
 	}, { Pad(4, 0, 0, 0) })
+	New("Frame", {
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.new(0, 0, 1, 0),
+		Size = UDim2.new(1, 0, 0, 2),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		BorderSizePixel = 0,
+		Parent = holder,
+	}, { Gradient(0, true) })
 	self._order += 1
-	local sec = { Frame = lbl, Text = string.lower(tostring(name)) }
+	local sec = { Frame = holder, Text = string.lower(tostring(name)) }
 	table.insert(self._sections, sec)
 	self._currentSection = sec
 end
 
 function Tab:AddLabel(text, height)
-	local row = self:_row(height or 32, text)
+	local row = self:_row(height or 34, text)
 	local lbl = New("TextLabel", {
 		BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(12, 0),
-		Size = UDim2.new(1, -24, 1, 0),
+		Position = UDim2.fromOffset(14, 0),
+		Size = UDim2.new(1, -28, 1, 0),
 		Font = FONT.Regular,
 		TextSize = 12,
 		TextWrapped = true,
@@ -803,19 +904,19 @@ end
 function Tab:AddButton(o)
 	o = o or {}
 	local hasDesc = o.Desc ~= nil and o.Desc ~= ""
-	local row = self:_row(hasDesc and 48 or 38, tostring(o.Name or "") .. " " .. tostring(o.Desc or ""))
-	self:_title(row, o.Name or "Button", hasDesc and o.Desc or nil, -40)
-	New("TextLabel", {
+	local row = self:_row(hasDesc and 52 or 42, tostring(o.Name or "") .. " " .. tostring(o.Desc or ""))
+	self:_title(row, o.Name or "Button", hasDesc and o.Desc or nil, -44)
+	local arrow = New("TextLabel", {
 		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -12, 0.5, 0),
-		Size = UDim2.fromOffset(14, 20),
+		Position = UDim2.new(1, -14, 0.5, 0),
+		Size = UDim2.fromOffset(16, 22),
 		BackgroundTransparency = 1,
 		Font = FONT.Bold,
-		TextSize = 16,
-		TextColor3 = Theme.SubText,
+		TextSize = 18,
+		TextColor3 = Color3.new(1, 1, 1),
 		Text = ">",
 		Parent = row,
-	})
+	}, { Gradient(0) })
 	local btn = New("TextButton", {
 		Size = UDim2.fromScale(1, 1),
 		BackgroundTransparency = 1,
@@ -824,7 +925,7 @@ function Tab:AddButton(o)
 	})
 	btn.MouseButton1Click:Connect(function()
 		row.BackgroundColor3 = Theme.ElementHover
-		Tween(row, 0.25, { BackgroundColor3 = Theme.Element })
+		Tween(row, 0.3, { BackgroundColor3 = Theme.Element })
 		SafeCall(o.Callback)
 	end)
 	local obj = {}
@@ -838,20 +939,23 @@ function Tab:AddToggle(o)
 	o = o or {}
 	local window = self.Window
 	local hasDesc = o.Desc ~= nil and o.Desc ~= ""
-	local row = self:_row(hasDesc and 48 or 38, tostring(o.Name or "") .. " " .. tostring(o.Desc or ""))
-	self:_title(row, o.Name or "Toggle", hasDesc and o.Desc or nil, -64)
+	local row = self:_row(hasDesc and 52 or 42, tostring(o.Name or "") .. " " .. tostring(o.Desc or ""))
+	self:_title(row, o.Name or "Toggle", hasDesc and o.Desc or nil, -70)
 
 	local switch = New("Frame", {
 		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -12, 0.5, 0),
-		Size = UDim2.fromOffset(38, 20),
+		Position = UDim2.new(1, -14, 0.5, 0),
+		Size = UDim2.fromOffset(42, 22),
 		BackgroundColor3 = Theme.Stroke,
 		BorderSizePixel = 0,
 		Parent = row,
 	}, { Corner(0, 1) })
+	local switchGrad = Gradient(0)
+	switchGrad.Enabled = false
+	switchGrad.Parent = switch
 	local knob = New("Frame", {
 		Position = UDim2.fromOffset(3, 3),
-		Size = UDim2.fromOffset(14, 14),
+		Size = UDim2.fromOffset(16, 16),
 		BackgroundColor3 = Theme.Text,
 		BorderSizePixel = 0,
 		Parent = switch,
@@ -865,11 +969,12 @@ function Tab:AddToggle(o)
 
 	local value = o.Default == true
 	local function render(animate)
-		local pos = value and UDim2.fromOffset(21, 3) or UDim2.fromOffset(3, 3)
-		local col = value and Theme.Accent or Theme.Stroke
+		local pos = value and UDim2.fromOffset(23, 3) or UDim2.fromOffset(3, 3)
+		local col = value and Color3.new(1, 1, 1) or Theme.Stroke
+		switchGrad.Enabled = value
 		if animate then
-			Tween(knob, 0.12, { Position = pos })
-			Tween(switch, 0.12, { BackgroundColor3 = col })
+			Tween(knob, 0.14, { Position = pos })
+			Tween(switch, 0.14, { BackgroundColor3 = col })
 		else
 			knob.Position = pos
 			switch.BackgroundColor3 = col
@@ -921,14 +1026,14 @@ function Tab:AddSlider(o)
 	end
 
 	local value = snap(o.Default or min)
-	local row = self:_row(54, o.Name or "")
+	local row = self:_row(58, o.Name or "")
 
 	New("TextLabel", {
 		BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(12, 6),
-		Size = UDim2.new(1, -110, 0, 18),
+		Position = UDim2.fromOffset(14, 7),
+		Size = UDim2.new(1, -120, 0, 18),
 		Font = FONT.Medium,
-		TextSize = 13,
+		TextSize = 14,
 		TextColor3 = Theme.Text,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd,
@@ -937,32 +1042,43 @@ function Tab:AddSlider(o)
 	})
 	local valLbl = New("TextLabel", {
 		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, -12, 0, 6),
-		Size = UDim2.fromOffset(90, 18),
+		Position = UDim2.new(1, -14, 0, 7),
+		Size = UDim2.fromOffset(100, 18),
 		BackgroundTransparency = 1,
-		Font = FONT.Medium,
-		TextSize = 12,
-		TextColor3 = Theme.SubText,
+		Font = FONT.Bold,
+		TextSize = 13,
+		TextColor3 = Theme.Blue,
 		TextXAlignment = Enum.TextXAlignment.Right,
 		Text = "",
 		Parent = row,
 	})
 	local bar = New("Frame", {
-		Position = UDim2.fromOffset(12, 36),
-		Size = UDim2.new(1, -24, 0, 8),
+		Position = UDim2.fromOffset(14, 38),
+		Size = UDim2.new(1, -28, 0, 8),
 		BackgroundColor3 = Theme.Background,
 		BorderSizePixel = 0,
 		Parent = row,
-	}, { Corner(0, 1) })
+	}, {
+		Corner(0, 1),
+		New("UIStroke", { Color = Theme.Stroke, Thickness = 1, Transparency = 0.4 }),
+	})
 	local fill = New("Frame", {
 		Size = UDim2.fromScale(0, 1),
-		BackgroundColor3 = Theme.Accent,
+		BackgroundColor3 = Color3.new(1, 1, 1),
 		BorderSizePixel = 0,
 		Parent = bar,
-	}, { Corner(0, 1) })
+	}, { Corner(0, 1), Gradient(0) })
+	local knob = New("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0, 0.5),
+		Size = UDim2.fromOffset(16, 16),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		BorderSizePixel = 0,
+		Parent = bar,
+	}, { Corner(0, 1), GradStroke(2, 0) })
 	local hit = New("TextButton", {
-		Position = UDim2.fromOffset(0, 24),
-		Size = UDim2.new(1, 0, 0, 30),
+		Position = UDim2.fromOffset(0, 26),
+		Size = UDim2.new(1, 0, 0, 32),
 		BackgroundTransparency = 1,
 		Text = "",
 		Parent = row,
@@ -971,7 +1087,9 @@ function Tab:AddSlider(o)
 	local obj = {}
 	function obj:Set(v, silent)
 		value = snap(tonumber(v) or min)
-		fill.Size = UDim2.fromScale((value - min) / span, 1)
+		local rel = (value - min) / span
+		fill.Size = UDim2.fromScale(rel, 1)
+		knob.Position = UDim2.fromScale(rel, 0.5)
 		valLbl.Text = tostring(value) .. suffix
 		window:_flag(o.Flag, value)
 		if not silent then
@@ -1023,16 +1141,16 @@ end
 function Tab:AddInput(o)
 	o = o or {}
 	local window = self.Window
-	local row = self:_row(40, o.Name or "")
-	self:_title(row, o.Name or "Input", nil, -170)
+	local row = self:_row(44, o.Name or "")
+	self:_title(row, o.Name or "Input", nil, -184)
 
 	local box = New("TextBox", {
-		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, -12, 0, 7),
-		Size = UDim2.fromOffset(150, 26),
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -12, 0.5, 0),
+		Size = UDim2.fromOffset(160, 28),
 		BackgroundColor3 = Theme.Background,
 		Font = FONT.Regular,
-		TextSize = 12,
+		TextSize = 13,
 		TextColor3 = Theme.Text,
 		PlaceholderText = tostring(o.Placeholder or "..."),
 		PlaceholderColor3 = Theme.SubText,
@@ -1040,7 +1158,11 @@ function Tab:AddInput(o)
 		ClearTextOnFocus = false,
 		TextTruncate = Enum.TextTruncate.AtEnd,
 		Parent = row,
-	}, { Corner(5), Pad(8, 0, 8, 0) })
+	}, {
+		Corner(7),
+		Pad(10, 0, 10, 0),
+		New("UIStroke", { Color = Theme.Stroke, Thickness = 1 }),
+	})
 
 	local value = ""
 	local obj = {}
@@ -1086,7 +1208,7 @@ function Tab:AddDropdown(o)
 	o = o or {}
 	local window = self.Window
 	local multi = o.Multi == true
-	local OPT_H, MAX_VISIBLE = 28, 5
+	local OPT_H, MAX_VISIBLE = 30, 5
 
 	local options = {}
 	for _, v in ipairs(o.Options or {}) do
@@ -1097,24 +1219,27 @@ function Tab:AddDropdown(o)
 	local open = false
 	local optButtons = {}
 
-	local row = self:_row(40, o.Name or "")
+	local row = self:_row(44, o.Name or "")
 	row.ClipsDescendants = true
-	self:_title(row, o.Name or "Dropdown", nil, -176)
+	self:_title(row, o.Name or "Dropdown", nil, -190)
 
 	local valueBox = New("Frame", {
 		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, -12, 0, 7),
-		Size = UDim2.fromOffset(156, 26),
+		Position = UDim2.new(1, -12, 0, 8),
+		Size = UDim2.fromOffset(166, 28),
 		BackgroundColor3 = Theme.Background,
 		BorderSizePixel = 0,
 		Parent = row,
-	}, { Corner(5) })
+	}, {
+		Corner(7),
+		New("UIStroke", { Color = Theme.Stroke, Thickness = 1 }),
+	})
 	local valueLbl = New("TextLabel", {
 		BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(8, 0),
-		Size = UDim2.new(1, -26, 1, 0),
+		Position = UDim2.fromOffset(10, 0),
+		Size = UDim2.new(1, -30, 1, 0),
 		Font = FONT.Medium,
-		TextSize = 12,
+		TextSize = 13,
 		TextColor3 = Theme.Text,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd,
@@ -1123,32 +1248,33 @@ function Tab:AddDropdown(o)
 	})
 	local arrow = New("TextLabel", {
 		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, -6, 0, 0),
-		Size = UDim2.fromOffset(14, 26),
+		Position = UDim2.new(1, -8, 0, 0),
+		Size = UDim2.fromOffset(14, 28),
 		BackgroundTransparency = 1,
 		Font = FONT.Bold,
-		TextSize = 11,
-		TextColor3 = Theme.SubText,
+		TextSize = 12,
+		TextColor3 = Color3.new(1, 1, 1),
 		Text = "v",
 		Parent = valueBox,
-	})
+	}, { Gradient(0) })
 	local list = New("ScrollingFrame", {
-		Position = UDim2.fromOffset(8, 44),
-		Size = UDim2.new(1, -16, 0, 0),
+		Position = UDim2.fromOffset(10, 48),
+		Size = UDim2.new(1, -20, 0, 0),
 		BackgroundColor3 = Theme.Background,
 		BorderSizePixel = 0,
 		ScrollBarThickness = 3,
+		ScrollBarImageColor3 = Theme.Blue,
 		CanvasSize = UDim2.new(),
 		AutomaticCanvasSize = Enum.AutomaticSize.Y,
 		Visible = false,
 		Parent = row,
 	}, {
-		Corner(5),
-		New("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder }),
-		Pad(2, 2, 2, 2),
+		Corner(7),
+		New("UIListLayout", { Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder }),
+		Pad(3, 3, 3, 3),
 	})
 	local header = New("TextButton", {
-		Size = UDim2.new(1, 0, 0, 40),
+		Size = UDim2.new(1, 0, 0, 44),
 		BackgroundTransparency = 1,
 		Text = "",
 		Parent = row,
@@ -1185,19 +1311,23 @@ function Tab:AddDropdown(o)
 			else
 				selected = single == opt
 			end
-			b.BackgroundColor3 = selected and Theme.Accent or Theme.Element
+			local grad = b:FindFirstChildOfClass("UIGradient")
+			if grad then
+				grad.Enabled = selected
+			end
+			b.BackgroundColor3 = selected and Color3.new(1, 1, 1) or Theme.Element
 			b.TextColor3 = selected and Color3.new(1, 1, 1) or Theme.Text
 		end
 	end
 	local function listHeight()
-		return math.min(#options, MAX_VISIBLE) * (OPT_H + 2) + 4
+		return math.min(#options, MAX_VISIBLE) * (OPT_H + 3) + 6
 	end
 	local function resize()
-		local h = open and (44 + listHeight() + 8) or 40
+		local h = open and (48 + listHeight() + 10) or 44
 		list.Visible = open
-		list.Size = UDim2.new(1, -16, 0, listHeight())
+		list.Size = UDim2.new(1, -20, 0, listHeight())
 		arrow.Text = open and "^" or "v"
-		Tween(row, 0.15, { Size = UDim2.new(1, 0, 0, h) })
+		Tween(row, 0.16, { Size = UDim2.new(1, 0, 0, h) })
 	end
 
 	local obj = {}
@@ -1230,17 +1360,19 @@ function Tab:AddDropdown(o)
 		end
 		optButtons = {}
 		for i, opt in ipairs(options) do
+			local grad = Gradient(0)
+			grad.Enabled = false
 			local b = New("TextButton", {
 				Size = UDim2.new(1, 0, 0, OPT_H),
 				BackgroundColor3 = Theme.Element,
 				AutoButtonColor = false,
-				Font = FONT.Regular,
-				TextSize = 12,
+				Font = FONT.Medium,
+				TextSize = 13,
 				Text = opt,
 				TextColor3 = Theme.Text,
 				LayoutOrder = i,
 				Parent = list,
-			}, { Corner(4) })
+			}, { Corner(6), grad })
 			optButtons[opt] = b
 			b.MouseButton1Click:Connect(function()
 				if multi then
