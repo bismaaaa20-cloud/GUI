@@ -1,13 +1,12 @@
---// MouseUI v2.3 | UI library universal, desain "premium dark gaming"
+--// XevoraUI v3.0 | library UI universal untuk XevoraHub
 --// Muat lewat: loadstring(game:HttpGet(URL))()
---// API sama dengan v1.x (CreateWindow / AddTab / AddSection / AddToggle / AddSlider /
---// AddDropdown / AddInput / AddButton / AddLabel / Notify), jadi script lama tetap jalan.
+--// API: CreateWindow / AddTab / AddSection / AddToggle / AddSlider / AddDropdown /
+--//      AddInput / AddButton / AddLabel / Notify / SaveConfig / LoadConfig
 --//
 --// Isi file:
---//   1. Theme & konfigurasi
---//   2. Helper (pembuat instance, tween, gradasi, drag, ikon)
---//   3. Window (header, sidebar, profil, animasi buka/tutup, notifikasi, config)
---//   4. Tab + komponen (section, toggle, slider, dropdown popup, input, tombol, label)
+--//   1. Theme & konfigurasi        4. Window (header, sidebar, layout adaptif)
+--//   2. Helper & ikon vektor       5. RGB & mode hemat performa
+--//   3. Efek tween yang bisa mati  6. Tab + komponen
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -18,48 +17,49 @@ local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 
-local Library = { Version = "2.3.0", Windows = {} }
+local Library = { Version = "3.0.0", Windows = {} }
 
 --// ===== 1. Theme & konfigurasi =====
 
 local Theme = {
-	Background = Color3.fromHex("#080B14"),
-	Panel = Color3.fromHex("#0E1220"),
-	Card = Color3.fromHex("#141A2B"),
-	Secondary = Color3.fromHex("#1B2236"),
-	Hover = Color3.fromHex("#222B45"),
-	Off = Color3.fromHex("#2A3350"),
-	Border = Color3.fromHex("#252D43"),
-	Blue = Color3.fromHex("#4D7CFE"),
-	Cyan = Color3.fromHex("#57C7FF"),
-	Purple = Color3.fromHex("#A855F7"),
-	Red = Color3.fromHex("#FF4D6D"),
-	Text = Color3.fromHex("#F4F6FF"),
-	SubText = Color3.fromHex("#9AA6C2"),
-	Glow = Color3.fromHex("#5A78D2"), -- warna garis tepi kaca (biru lembut)
+	Background = Color3.fromHex("#0A0F1B"),
+	Panel = Color3.fromHex("#0E1422"),
+	Card = Color3.fromHex("#141B2E"),
+	Secondary = Color3.fromHex("#1A2338"),
+	Hover = Color3.fromHex("#212C47"),
+	Off = Color3.fromHex("#2B3550"),
+	Border = Color3.fromHex("#263150"),
+	Glow = Color3.fromHex("#5A78D2"),
+	Blue = Color3.fromHex("#5685FF"),
+	Purple = Color3.fromHex("#9B6BFF"),
+	Red = Color3.fromHex("#FF526D"),
+	Soft = Color3.fromHex("#DCE6FF"), -- pengganti putih murni untuk kontrol interaktif
+	Cyan = Color3.fromHex("#8FB8FF"),
+	Text = Color3.fromHex("#F2F5FF"),
+	SubText = Color3.fromHex("#98A4C4"),
 }
 Library.Theme = Theme -- ubah sebelum CreateWindow kalau mau ganti warna
 
 -- Sumber ikon (dicoba berurutan): file lokal -> URL -> ID asset
-Library.DefaultIconFile = nil -- contoh: "logo.png" (file di folder workspace executor)
+Library.DefaultIconFile = nil
 Library.DefaultIconURL = "https://raw.githubusercontent.com/bismaaaa20-cloud/GUI/refs/heads/main/logo_decal_1024.jpg"
-Library.DefaultIcon = 90803590596423 -- ID asset logo (cadangan terakhir)
-
--- Efek kaca: 0 = padat, makin besar makin tembus pandang. Teks selalu tetap padat.
-Library.PanelTransparency = 0.2 -- latar panel utama
-Library.CardTransparency = 0.32 -- kartu: sidebar, baris fitur
-Library.FieldTransparency = 0.42 -- kolom: search, input, kotak dropdown, profil
+Library.DefaultIcon = 90803590596423
 Library.IconSize = 60 -- diameter tombol logo bulat (piksel)
-Library.IconZoom = 1.25 -- pembesaran gambar di dalam lingkaran (1 = apa adanya)
+Library.IconZoom = 1.25 -- pembesaran gambar di dalam lingkaran
 
--- RGB berjalan lewat TweenService (diproses engine, tanpa loop Lua per frame) dan
--- otomatis berhenti saat panel disembunyikan.
-Library.RGB = true -- garis tepi, cincin logo, garis header berputar warna pelangi
-Library.RGBControls = true -- toggle aktif, slider, indikator tab ikut RGB
+-- Transparansi: 0 = padat. Default dibuat solid (~94%) supaya tulisan tidak terganggu objek game.
+Library.PanelTransparency = 0.06
+Library.CardTransparency = 0.1
+Library.FieldTransparency = 0.18
+
+-- RGB berjalan lewat TweenService (diproses engine, tanpa loop Lua per frame)
+-- dan otomatis berhenti saat panel disembunyikan.
+Library.RGB = true
+Library.RGBControls = true
 Library.Performance = "Auto" -- "Auto" (deteksi FPS) / "High" / "Low" (HP kentang)
 
--- Ukuran dasar panel. Skala akhir = menyesuaikan layar x pengali (Small/Medium/Large).
-local WIN_W, WIN_H = 620, 360
+local WIN_H = 360 -- tinggi dasar panel; lebar dihitung adaptif dari layar
+local MIN_W, MAX_W = 470, 700
 local SCALES = { Small = 0.85, Medium = 1, Large = 1.2 }
 local FONT = {
 	Regular = Enum.Font.Gotham,
@@ -119,14 +119,6 @@ local function Gradient(rotation, fade)
 	})
 end
 
--- Aksen kontrol: gradasi halus satu keluarga biru (lebih kalem daripada biru-ungu)
-local function Accent(rotation)
-	return New("UIGradient", {
-		Color = ColorSequence.new(Theme.Blue, Color3.fromHex("#6FA8FF")),
-		Rotation = rotation or 0,
-	})
-end
-
 local function GradStroke(thickness, rotation, transparency)
 	return New("UIStroke", {
 		Color = Color3.new(1, 1, 1),
@@ -135,10 +127,6 @@ local function GradStroke(thickness, rotation, transparency)
 	}, { Gradient(rotation or 0) })
 end
 
--- Mode hemat (HP kentang): semua animasi UI dimatikan (nilai langsung diterapkan).
-local PERF = { low = false }
-local NoTween = { Play = function() end, Cancel = function() end, Pause = function() end }
-
 local function RainbowSeq()
 	local keys = {}
 	for i = 0, 6 do
@@ -146,6 +134,11 @@ local function RainbowSeq()
 	end
 	return ColorSequence.new(keys)
 end
+
+--// ===== 3. Tween yang bisa dimatikan (mode hemat) =====
+
+local PERF = { low = false }
+local NoTween = { Play = function() end, Cancel = function() end, Pause = function() end }
 
 local function Tween(inst, time, props, style)
 	if PERF.low then
@@ -169,7 +162,7 @@ local function SafeCall(fn, ...)
 	end
 	local ok, err = pcall(fn, ...)
 	if not ok then
-		warn("[MouseUI] error di callback: " .. tostring(err))
+		warn("[XevoraUI] error di callback: " .. tostring(err))
 	end
 end
 
@@ -223,18 +216,18 @@ local function ResolveIcon(icon, file, url)
 		end
 		if url and url ~= "" and typeof(writefile) == "function" then
 			local ok, res = pcall(function()
-				if typeof(isfolder) == "function" and typeof(makefolder) == "function" and not isfolder("MouseUI") then
-					makefolder("MouseUI")
+				if typeof(isfolder) == "function" and typeof(makefolder) == "function" and not isfolder("XevoraUI") then
+					makefolder("XevoraUI")
 				end
 				local ext = tostring(url):match("%.(%w+)$") or "png"
-				local path = "MouseUI/icon." .. ext
+				local path = "XevoraUI/icon." .. ext
 				writefile(path, game:HttpGet(url))
 				return getcustomasset(path)
 			end)
 			if ok and res then
 				return res, "url"
 			end
-			warn("[MouseUI] gagal memuat IconURL, mencoba ID asset")
+			warn("[XevoraUI] gagal memuat IconURL, mencoba ID asset")
 		end
 	end
 	return ToAsset(icon), "id"
@@ -258,14 +251,33 @@ local function GetGuiParent()
 	return LocalPlayer:WaitForChild("PlayerGui")
 end
 
--- Skala otomatis: landscape memakai ~62% lebar & ~84% tinggi layar, portrait ~94% lebar.
-local function GetFit()
+-- Menjaga panel tidak keluar layar (sebagian header harus tetap terlihat).
+local function ClampToScreen(frame, getScale)
 	local cam = workspace.CurrentCamera
-	local vp = cam and cam.ViewportSize or Vector2.new(800, 400)
-	local landscape = vp.X >= vp.Y
-	local fw = landscape and 0.62 or 0.94
-	local fh = landscape and 0.84 or 0.5
-	return math.min(vp.X * fw / WIN_W, vp.Y * fh / WIN_H, 1.25)
+	if not cam then
+		return
+	end
+	local vp = cam.ViewportSize
+	local pos, size = frame.AbsolutePosition, frame.AbsoluteSize
+	if size.X < 10 or size.Y < 10 then
+		return -- belum dirender
+	end
+	local dx, dy = 0, 0
+	if pos.X > vp.X - 80 then
+		dx = (vp.X - 80) - pos.X
+	elseif pos.X + size.X < 80 then
+		dx = 80 - (pos.X + size.X)
+	end
+	if pos.Y < 0 then
+		dy = -pos.Y
+	elseif pos.Y > vp.Y - 50 then
+		dy = (vp.Y - 50) - pos.Y
+	end
+	if dx ~= 0 or dy ~= 0 then
+		local s = getScale and getScale() or 1
+		local p = frame.Position
+		frame.Position = UDim2.new(p.X.Scale, p.X.Offset + dx / s, p.Y.Scale, p.Y.Offset + dy / s)
+	end
 end
 
 local function MakeDraggable(handle, target, track, onClick, getScale)
@@ -303,11 +315,102 @@ local function MakeDraggable(handle, target, track, onClick, getScale)
 				startPos.X.Scale, startPos.X.Offset + delta.X / s,
 				startPos.Y.Scale, startPos.Y.Offset + delta.Y / s
 			)
+			ClampToScreen(target, getScale)
 		end
 	end))
 end
 
---// ===== 3. Window =====
+-- Ikon vektor (digambar dari Frame, jadi tidak bergantung font atau asset).
+local function MagnifierIcon(parent, position)
+	local holder = New("Frame", {
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = position,
+		Size = UDim2.fromOffset(16, 16),
+		BackgroundTransparency = 1,
+		Parent = parent,
+	})
+	New("Frame", {
+		Position = UDim2.fromOffset(1, 1),
+		Size = UDim2.fromOffset(10, 10),
+		BackgroundTransparency = 1,
+		Parent = holder,
+	}, { Corner(0, 1), Stroke(Theme.SubText, 1.6, 0) })
+	New("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromOffset(12.5, 12.5),
+		Size = UDim2.fromOffset(6, 2),
+		Rotation = 45,
+		BackgroundColor3 = Theme.SubText,
+		BorderSizePixel = 0,
+		Parent = holder,
+	}, { Corner(0, 1) })
+	return holder
+end
+
+-- Tombol header: kind = "min" | "max" | "close"
+local function HeaderButton(parent, kind, xOffset, accent, callback)
+	local b = New("TextButton", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, xOffset, 0.5, 0),
+		Size = UDim2.fromOffset(36, 36),
+		BackgroundColor3 = accent,
+		BackgroundTransparency = 1,
+		Text = "",
+		AutoButtonColor = false,
+		Parent = parent,
+	}, { Corner(10) })
+
+	local function bar(rot, yOff)
+		return New("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.new(0.5, 0, 0.5, yOff or 0),
+			Size = UDim2.fromOffset(14, 2),
+			Rotation = rot,
+			BackgroundColor3 = Theme.SubText,
+			BorderSizePixel = 0,
+			Parent = b,
+		}, { Corner(0, 1) })
+	end
+
+	local bars, sqStroke = {}, nil
+	if kind == "close" then
+		bars = { bar(45), bar(-45) }
+	elseif kind == "min" then
+		bars = { bar(0, 4) }
+	else
+		local sq = New("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromOffset(12, 12),
+			BackgroundTransparency = 1,
+			Parent = b,
+		}, { Corner(3), Stroke(Theme.SubText, 2, 0) })
+		sqStroke = sq:FindFirstChildOfClass("UIStroke")
+	end
+
+	b.MouseEnter:Connect(function()
+		Tween(b, 0.12, { BackgroundTransparency = 0.85 })
+		for _, p in ipairs(bars) do
+			Tween(p, 0.12, { BackgroundColor3 = accent })
+		end
+		if sqStroke then
+			Tween(sqStroke, 0.12, { Color = accent })
+		end
+	end)
+	b.MouseLeave:Connect(function()
+		Tween(b, 0.14, { BackgroundTransparency = 1 })
+		for _, p in ipairs(bars) do
+			Tween(p, 0.14, { BackgroundColor3 = Theme.SubText })
+		end
+		if sqStroke then
+			Tween(sqStroke, 0.14, { Color = Theme.SubText })
+		end
+	end)
+	b.MouseButton1Click:Connect(callback)
+	return b
+end
+
+--// ===== 4. Window =====
 
 local Window = {}
 Window.__index = Window
@@ -321,13 +424,13 @@ function Library:CreateWindow(opts)
 	if typeof(opts.KeyCheck) == "function" then
 		local ok, valid = pcall(opts.KeyCheck)
 		if not ok or valid ~= true then
-			warn("[MouseUI] KeyCheck gagal, window tidak dibuat.")
+			warn("[XevoraUI] KeyCheck gagal, window tidak dibuat.")
 			return nil
 		end
 	end
 
 	local self = setmetatable({}, Window)
-	self.Title = tostring(opts.Title or "MouseUI")
+	self.Title = tostring(opts.Title or "XevoraHub")
 	self.Flags = {}
 	self.IconSource = "none"
 	self._conns = {}
@@ -335,7 +438,9 @@ function Library:CreateWindow(opts)
 	self._setters = {}
 	self._activeTab = nil
 	self._visible = true
+	self._maxed = false
 	self._mult = 1
+	self._targetScale = 1
 	self._rgbList = {}
 	self._rgbOn = false
 	self._strokes = {}
@@ -343,8 +448,7 @@ function Library:CreateWindow(opts)
 	self._low = false
 	self._perfMode = tostring(opts.Performance or Library.Performance)
 	self._rgbWanted = opts.RGB ~= false and Library.RGB ~= false
-	self._targetScale = 1
-	self._folder = "MouseUI/" .. self.Title:gsub("[^%w_%-]", "_")
+	self._folder = "XevoraUI/" .. self.Title:gsub("[^%w_%-]", "_")
 	if opts.ConfigFolder then
 		self._folder = tostring(opts.ConfigFolder)
 	end
@@ -354,7 +458,7 @@ function Library:CreateWindow(opts)
 	local fieldT = math.clamp(opts.FieldTransparency or Library.FieldTransparency, 0, 0.85)
 	self._cardT, self._fieldT = cardT, fieldT
 
-	-- Icon = false mematikan gambar ikon (tetap tampil huruf "M")
+	-- Icon = false mematikan gambar ikon (tetap tampil huruf "X")
 	local icon = opts.Icon
 	if icon == nil then
 		icon = Library.DefaultIcon
@@ -370,7 +474,7 @@ function Library:CreateWindow(opts)
 	end
 
 	local parent = GetGuiParent()
-	local guiName = "MouseUI_" .. self.Title
+	local guiName = "XevoraUI_" .. self.Title
 	local old = parent:FindFirstChild(guiName)
 	if old then
 		old:Destroy()
@@ -393,12 +497,12 @@ function Library:CreateWindow(opts)
 		return self:_track(conn)
 	end
 
-	--// Root (diskalakan & digeser) + bayangan lembut + panel utama
+	--// Root (diskalakan & digeser) + bayangan tipis + panel utama
 	local root = New("Frame", {
 		Name = "Root",
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.new(0.5, 0, 0.5, 0),
-		Size = UDim2.fromOffset(WIN_W, WIN_H),
+		Size = UDim2.fromOffset(MIN_W, WIN_H),
 		BackgroundTransparency = 1,
 		Parent = gui,
 	})
@@ -433,23 +537,21 @@ function Library:CreateWindow(opts)
 	})
 	self.Main = main
 
-	self:SetScale(opts.Scale or "Medium")
-
 	--// Header
 	local header = New("Frame", {
 		Name = "Header",
-		Size = UDim2.new(1, 0, 0, 52),
+		Size = UDim2.new(1, 0, 0, 56),
 		BackgroundTransparency = 1,
 		Parent = main,
 	})
 
-	local textX = 16
+	local textX = 18
 	if iconAsset then
-		textX = 60
+		textX = 62
 		New("ImageLabel", {
 			AnchorPoint = Vector2.new(0, 0.5),
-			Position = UDim2.new(0, 14, 0.5, 0),
-			Size = UDim2.fromOffset(36, 36),
+			Position = UDim2.new(0, 16, 0.5, 0),
+			Size = UDim2.fromOffset(34, 34),
 			BackgroundColor3 = Color3.new(0, 0, 0),
 			Image = iconAsset,
 			ScaleType = Enum.ScaleType.Crop,
@@ -457,82 +559,65 @@ function Library:CreateWindow(opts)
 		}, { Corner(0, 1), self:_regStroke(GradStroke(1.5, 45)) })
 	end
 
-	local titleText = self.Title
+	local subParts = {}
 	if opts.SubTitle then
-		titleText = titleText .. " : " .. tostring(opts.SubTitle)
+		table.insert(subParts, tostring(opts.SubTitle))
 	end
+	if opts.Author then
+		table.insert(subParts, "by " .. tostring(opts.Author))
+	end
+	local subText = table.concat(subParts, "  |  ")
 	New("TextLabel", {
 		BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(textX, opts.Author and 9 or 0),
-		Size = UDim2.new(1, -(textX + 100), 0, opts.Author and 20 or 52),
+		Position = UDim2.fromOffset(textX, subText ~= "" and 10 or 0),
+		Size = UDim2.new(1, -(textX + 136), 0, subText ~= "" and 21 or 56),
 		Font = FONT.Bold,
-		TextSize = 16,
+		TextSize = 17,
 		TextColor3 = Theme.Text,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd,
-		Text = titleText,
+		Text = self.Title,
 		Parent = header,
 	})
-	if opts.Author then
+	if subText ~= "" then
 		New("TextLabel", {
 			BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(textX, 29),
-			Size = UDim2.new(1, -(textX + 100), 0, 16),
+			Position = UDim2.fromOffset(textX, 31),
+			Size = UDim2.new(1, -(textX + 136), 0, 16),
 			Font = FONT.Regular,
 			TextSize = 12,
 			TextColor3 = Theme.SubText,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextTruncate = Enum.TextTruncate.AtEnd,
-			Text = "by " .. tostring(opts.Author),
+			Text = subText,
 			Parent = header,
 		})
 	end
 
-	-- Tombol header: area sentuh 40x40, hover/tekan berubah warna
-	local function headerButton(text, xOffset, accent, callback)
-		local b = New("TextButton", {
-			AnchorPoint = Vector2.new(1, 0.5),
-			Position = UDim2.new(1, xOffset, 0.5, 0),
-			Size = UDim2.fromOffset(40, 40),
-			BackgroundColor3 = accent,
-			BackgroundTransparency = 1,
-			Font = FONT.Bold,
-			TextSize = 16,
-			TextColor3 = Theme.SubText,
-			Text = text,
-			AutoButtonColor = false,
-			Parent = header,
-		}, { Corner(10) })
-		b.MouseEnter:Connect(function()
-			Tween(b, 0.12, { BackgroundTransparency = 0.82, TextColor3 = accent })
-		end)
-		b.MouseLeave:Connect(function()
-			Tween(b, 0.14, { BackgroundTransparency = 1, TextColor3 = Theme.SubText })
-		end)
-		b.MouseButton1Click:Connect(callback)
-		return b
-	end
-	headerButton("X", -10, Theme.Red, function()
+	HeaderButton(header, "close", -12, Theme.Red, function()
 		self:Destroy()
 	end)
-	headerButton("—", -54, Theme.Blue, function()
+	HeaderButton(header, "max", -52, Theme.Cyan, function()
+		self:SetMaximized(not self._maxed)
+	end)
+	HeaderButton(header, "min", -92, Theme.Blue, function()
 		self:Toggle(false)
 	end)
 
-	-- Garis aksen tipis pemisah header
+	-- Garis pemisah header
 	New("Frame", {
-		Position = UDim2.fromOffset(0, 52),
+		Position = UDim2.fromOffset(0, 56),
 		Size = UDim2.new(1, 0, 0, 1),
 		BackgroundColor3 = Color3.new(1, 1, 1),
 		BorderSizePixel = 0,
 		Parent = main,
 	}, { self:_regGrad(Gradient(0), "slide") })
 
-	--// Sidebar (kartu melayang)
+	--// Sidebar (kartu)
 	local sidebar = New("Frame", {
 		Name = "Sidebar",
-		Position = UDim2.fromOffset(10, 62),
-		Size = UDim2.new(0, 164, 1, -72),
+		Position = UDim2.fromOffset(10, 67),
+		Size = UDim2.new(0, 168, 1, -77),
 		BackgroundColor3 = Theme.Card,
 		BackgroundTransparency = cardT,
 		BorderSizePixel = 0,
@@ -541,6 +626,7 @@ function Library:CreateWindow(opts)
 		Corner(12),
 		Stroke(Theme.Glow, 1, 0.72),
 	})
+	self._sidebar = sidebar
 
 	self._searchBox = New("TextBox", {
 		Position = UDim2.fromOffset(10, 10),
@@ -558,9 +644,10 @@ function Library:CreateWindow(opts)
 		Parent = sidebar,
 	}, {
 		Corner(10),
-		Pad(12, 0, 12, 0),
+		Pad(34, 0, 10, 0),
 		Stroke(Theme.Glow, 1, 0.7),
 	})
+	MagnifierIcon(self._searchBox, UDim2.new(0, -24, 0.5, 0))
 
 	self._tabList = New("ScrollingFrame", {
 		Position = UDim2.fromOffset(0, 54),
@@ -625,8 +712,8 @@ function Library:CreateWindow(opts)
 	--// Area konten
 	self._content = New("Frame", {
 		Name = "Content",
-		Position = UDim2.fromOffset(184, 62),
-		Size = UDim2.new(1, -194, 1, -72),
+		Position = UDim2.fromOffset(188, 67),
+		Size = UDim2.new(1, -198, 1, -77),
 		BackgroundTransparency = 1,
 		ClipsDescendants = true,
 		Parent = main,
@@ -651,7 +738,7 @@ function Library:CreateWindow(opts)
 	})
 	self._notifyOrder = 0
 
-	--// Tombol logo bulat (buka/tutup). Huruf "M" jadi cadangan di bawah gambar.
+	--// Tombol logo bulat (buka/tutup). Huruf "X" jadi cadangan di bawah gambar.
 	local iconSize = math.clamp(opts.IconSize or Library.IconSize, 40, 120)
 	local iconBtn = New("TextButton", {
 		Name = "ToggleIcon",
@@ -659,7 +746,7 @@ function Library:CreateWindow(opts)
 		Position = UDim2.new(0.5, -iconSize / 2, 0, 14),
 		BackgroundColor3 = Color3.new(0, 0, 0),
 		AutoButtonColor = false,
-		Text = "M",
+		Text = "X",
 		Font = FONT.Bold,
 		TextSize = 30,
 		TextColor3 = Theme.Text,
@@ -682,7 +769,7 @@ function Library:CreateWindow(opts)
 		})
 		task.delay(6, function()
 			if img.Parent and not img.IsLoaded then
-				warn("[MouseUI] gambar ikon belum termuat (sumber: " .. iconSource .. "). Kalau 'id', kemungkinan itu ID decal.")
+				warn("[XevoraUI] gambar ikon belum termuat (sumber: " .. iconSource .. "). Kalau 'id', kemungkinan itu ID decal.")
 			end
 		end)
 	end
@@ -705,11 +792,13 @@ function Library:CreateWindow(opts)
 	local cam = workspace.CurrentCamera
 	if cam then
 		track(cam:GetPropertyChangedSignal("ViewportSize"):Connect(function()
-			self:SetScale()
+			self:_layout()
 		end))
 	end
 
 	table.insert(Library.Windows, self)
+
+	self:SetScale(opts.Scale or "Medium")
 
 	self._rgbOn = self._rgbWanted
 	self:_syncAll()
@@ -732,19 +821,373 @@ function Window:_flag(flag, value)
 	end
 end
 
--- v = "Small" / "Medium" / "Large" atau angka pengali. Tanpa argumen = hitung ulang sesuai layar.
+-- Layout adaptif: lebar panel mengikuti layar (bukan sekadar mengecilkan semuanya),
+-- sidebar menyempit di layar sempit, dan panel selalu muat di layar.
+function Window:_layout()
+	local cam = workspace.CurrentCamera
+	local vp = cam and cam.ViewportSize or Vector2.new(800, 400)
+	local maxed = self._maxed
+	local fitH = vp.Y * (maxed and 0.94 or 0.84) / WIN_H
+	local fitW = vp.X * (maxed and 0.98 or 0.94) / MIN_W
+	local s = math.min(fitH, fitW, maxed and 1.4 or 1.15)
+	local W = math.clamp(vp.X * (maxed and 0.96 or 0.66) / s, MIN_W, maxed and 960 or MAX_W)
+	local sbW = W < 560 and 148 or 168
+
+	self.Root.Size = UDim2.fromOffset(W, WIN_H)
+	self._sidebar.Size = UDim2.new(0, sbW, 1, -77)
+	self._content.Position = UDim2.fromOffset(sbW + 20, 67)
+	self._content.Size = UDim2.new(1, -(sbW + 30), 1, -77)
+
+	self._targetScale = math.clamp(s * self._mult, 0.45, 1.8)
+	if self._visible then
+		self._scale.Scale = self._targetScale
+	end
+	ClampToScreen(self.Root, function()
+		return self._scale.Scale
+	end)
+end
+
+-- v = "Small" / "Medium" / "Large" atau angka pengali.
 function Window:SetScale(v)
 	local mult = type(v) == "number" and v or SCALES[v]
 	if mult then
 		self._mult = mult
 	end
-	self._targetScale = math.clamp(GetFit() * self._mult, 0.45, 1.8)
-	if self._visible then
-		self._scale.Scale = self._targetScale
+	self:_layout()
+end
+
+function Window:SetMaximized(on)
+	self._maxed = on and true or false
+	if self._closePopup then
+		self._closePopup()
+	end
+	self:_layout()
+end
+
+-- Buka/tutup dengan animasi skala singkat.
+function Window:Toggle(state)
+	if state == nil then
+		state = not self._visible
+	end
+	if state == self._visible then
+		return
+	end
+	self._visible = state
+	self:_syncAll()
+	if not state and self._closePopup then
+		self._closePopup()
+	end
+	local target = self._targetScale
+	if state then
+		self.Root.Visible = true
+		self._scale.Scale = target * 0.92
+		Tween(self._scale, 0.22, { Scale = target }, Enum.EasingStyle.Back)
+	else
+		Tween(self._scale, 0.14, { Scale = target * 0.94 })
+		task.delay(0.14, function()
+			if not self._visible and self.Root and self.Root.Parent then
+				self.Root.Visible = false
+			end
+		end)
 	end
 end
 
---// RGB & performa
+function Window:Destroy()
+	for _, e in ipairs(self._rgbList) do
+		if e.tween then
+			e.tween:Cancel()
+		end
+	end
+	self._rgbList = {}
+	for _, conn in ipairs(self._conns) do
+		pcall(function()
+			conn:Disconnect()
+		end)
+	end
+	self._conns = {}
+	if self.Gui then
+		self.Gui:Destroy()
+		self.Gui = nil
+	end
+	for i, w in ipairs(Library.Windows) do
+		if w == self then
+			table.remove(Library.Windows, i)
+			break
+		end
+	end
+	if #Library.Windows == 0 then
+		PERF.low = false
+	end
+end
+
+function Window:Notify(o)
+	o = o or {}
+	self._notifyOrder += 1
+	local card = New("Frame", {
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundColor3 = Theme.Card,
+		BorderSizePixel = 0,
+		LayoutOrder = self._notifyOrder,
+		Parent = self._notifyHolder,
+	}, {
+		Corner(12),
+		Stroke(Theme.Border, 1, 0),
+	})
+	New("Frame", {
+		Size = UDim2.new(0, 3, 1, -16),
+		Position = UDim2.fromOffset(8, 8),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		BorderSizePixel = 0,
+		Parent = card,
+	}, { Corner(2), Gradient(90) })
+	local body = New("Frame", {
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+		Parent = card,
+	}, {
+		Pad(24, 11, 14, 11),
+		New("UIListLayout", { Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder }),
+	})
+	New("TextLabel", {
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+		Font = FONT.Semi,
+		TextSize = 14,
+		TextColor3 = Theme.Text,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextWrapped = true,
+		Text = tostring(o.Title or "Notifikasi"),
+		LayoutOrder = 1,
+		Parent = body,
+	})
+	if o.Content then
+		New("TextLabel", {
+			Size = UDim2.new(1, 0, 0, 0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			BackgroundTransparency = 1,
+			Font = FONT.Regular,
+			TextSize = 12,
+			TextColor3 = Theme.SubText,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextWrapped = true,
+			Text = tostring(o.Content),
+			LayoutOrder = 2,
+			Parent = body,
+		})
+	end
+
+	-- Muncul & hilang dengan fade halus
+	local labels = {}
+	for _, d in ipairs(body:GetChildren()) do
+		if d:IsA("TextLabel") then
+			table.insert(labels, d)
+			d.TextTransparency = 1
+		end
+	end
+	card.BackgroundTransparency = 1
+	Tween(card, 0.22, { BackgroundTransparency = 0.05 })
+	for _, l in ipairs(labels) do
+		Tween(l, 0.22, { TextTransparency = 0 })
+	end
+	task.delay(o.Duration or 4, function()
+		if not (card and card.Parent) then
+			return
+		end
+		Tween(card, 0.25, { BackgroundTransparency = 1 })
+		for _, l in ipairs(labels) do
+			if l.Parent then
+				Tween(l, 0.25, { TextTransparency = 1 })
+			end
+		end
+		task.delay(0.27, function()
+			if card and card.Parent then
+				card:Destroy()
+			end
+		end)
+	end)
+end
+
+function Window:SaveConfig(name)
+	if typeof(writefile) ~= "function" then
+		return false, "executor tidak mendukung writefile"
+	end
+	local ok, err = pcall(function()
+		if typeof(isfolder) == "function" and typeof(makefolder) == "function" and not isfolder(self._folder) then
+			makefolder(self._folder)
+		end
+		writefile(self._folder .. "/" .. tostring(name or "default") .. ".json", HttpService:JSONEncode(self.Flags))
+	end)
+	return ok, err
+end
+
+function Window:LoadConfig(name)
+	if typeof(readfile) ~= "function" or typeof(isfile) ~= "function" then
+		return false, "executor tidak mendukung readfile/isfile"
+	end
+	local path = self._folder .. "/" .. tostring(name or "default") .. ".json"
+	if not isfile(path) then
+		return false, "file config tidak ditemukan"
+	end
+	local ok, data = pcall(function()
+		return HttpService:JSONDecode(readfile(path))
+	end)
+	if not ok or type(data) ~= "table" then
+		return false, "file config rusak"
+	end
+	for flag, value in pairs(data) do
+		local setter = self._setters[flag]
+		if setter then
+			pcall(setter, value)
+		end
+	end
+	return true
+end
+
+function Window:_select(tab)
+	if self._closePopup then
+		self._closePopup()
+	end
+	local changed = self._activeTab ~= tab
+	local activeT = math.max(self._fieldT - 0.1, 0.05)
+	for _, t in ipairs(self._tabs) do
+		local active = (t == tab)
+		t.Page.Visible = active
+		Tween(t.Button, 0.15, { BackgroundTransparency = active and activeT or 1 })
+		t._indicator.Visible = active
+		if t._rgbEntry then
+			t._rgbEntry.active = active
+			self:_syncRGB(t._rgbEntry)
+		end
+		t._label.TextColor3 = active and Theme.Text or Theme.SubText
+		t._badgeGrad.Enabled = active
+		t._badge.BackgroundColor3 = active and Color3.new(1, 1, 1) or Theme.Secondary
+		t._badgeLbl.TextColor3 = active and Color3.new(1, 1, 1) or Theme.SubText
+		if t._icon then
+			t._icon.ImageColor3 = active and Color3.new(1, 1, 1) or Theme.SubText
+		end
+	end
+	self._activeTab = tab
+	if changed then
+		tab.Page.Position = UDim2.fromOffset(18, 0)
+		Tween(tab.Page, 0.2, { Position = UDim2.fromOffset(0, 0) })
+	end
+	tab:_applySearch(self._searchBox.Text)
+end
+
+function Window:AddTab(opts)
+	if type(opts) == "string" then
+		opts = { Name = opts }
+	end
+	opts = opts or {}
+
+	local tab = setmetatable({}, Tab)
+	tab.Window = self
+	tab.Name = tostring(opts.Name or "Tab")
+	tab._items = {}
+	tab._sections = {}
+	tab._currentSection = nil
+	tab._order = 1
+
+	tab.Button = New("TextButton", {
+		Size = UDim2.new(1, 0, 0, 42),
+		BackgroundColor3 = Theme.Hover,
+		BackgroundTransparency = 1,
+		Text = "",
+		AutoButtonColor = false,
+		LayoutOrder = #self._tabs + 1,
+		Parent = self._tabList,
+	}, { Corner(10) })
+
+	local indicatorGrad = Gradient(90)
+	tab._rgbEntry = self:_regControl(indicatorGrad, false)
+	tab._indicator = New("Frame", {
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 0, 0.5, 0),
+		Size = UDim2.fromOffset(3, 20),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		BorderSizePixel = 0,
+		Visible = false,
+		Parent = tab.Button,
+	}, { Corner(2), indicatorGrad })
+
+	-- Lencana ikon: hanya tampil kalau Icon diberikan; tanpa Icon tab berupa teks saja
+	tab._badge = New("Frame", {
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 12, 0.5, 0),
+		Size = UDim2.fromOffset(26, 26),
+		BackgroundColor3 = Theme.Secondary,
+		BorderSizePixel = 0,
+		Visible = opts.Icon ~= nil,
+		Parent = tab.Button,
+	}, { Corner(8) })
+	tab._badgeGrad = Gradient(45)
+	tab._badgeGrad.Enabled = false
+	tab._badgeGrad.Parent = tab._badge
+	tab._badgeLbl = New("TextLabel", {
+		BackgroundTransparency = 1,
+		Size = UDim2.fromScale(1, 1),
+		Font = FONT.Bold,
+		TextSize = 13,
+		TextColor3 = Theme.SubText,
+		Text = "",
+		Parent = tab._badge,
+	})
+	if opts.Icon then
+		tab._icon = New("ImageLabel", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromOffset(16, 16),
+			BackgroundTransparency = 1,
+			Image = ToAsset(opts.Icon),
+			ImageColor3 = Theme.SubText,
+			Parent = tab._badge,
+		})
+	end
+
+	tab._label = New("TextLabel", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(opts.Icon and 48 or 16, 0),
+		Size = UDim2.new(1, opts.Icon and -54 or -22, 1, 0),
+		Font = FONT.Semi,
+		TextSize = 14,
+		TextColor3 = Theme.SubText,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Text = tab.Name,
+		Parent = tab.Button,
+	})
+
+	tab.Page = New("ScrollingFrame", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 3,
+		ScrollBarImageColor3 = Theme.Blue,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		Visible = false,
+		Parent = self._content,
+	}, {
+		New("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }),
+		Pad(0, 0, 8, 12),
+	})
+
+	tab.Button.MouseButton1Click:Connect(function()
+		self:_select(tab)
+	end)
+
+	table.insert(self._tabs, tab)
+	if #self._tabs == 1 then
+		self:_select(tab)
+	end
+	return tab
+end
+
+--// ===== 5. RGB & performa =====
 
 -- Mendaftarkan UIGradient agar berputar warna pelangi (kind: "rotate" atau "slide").
 function Window:_reg(grad, active, kind)
@@ -889,331 +1332,7 @@ function Window:_probeFPS()
 	end)
 end
 
--- Buka/tutup dengan animasi skala singkat.
-function Window:Toggle(state)
-	if state == nil then
-		state = not self._visible
-	end
-	if state == self._visible then
-		return
-	end
-	self._visible = state
-	self:_syncAll()
-	if not state and self._closePopup then
-		self._closePopup()
-	end
-	local target = self._targetScale
-	if state then
-		self.Root.Visible = true
-		self._scale.Scale = target * 0.92
-		Tween(self._scale, 0.22, { Scale = target }, Enum.EasingStyle.Back)
-	else
-		Tween(self._scale, 0.14, { Scale = target * 0.94 })
-		task.delay(0.14, function()
-			if not self._visible and self.Root and self.Root.Parent then
-				self.Root.Visible = false
-			end
-		end)
-	end
-end
-
-function Window:Destroy()
-	for _, e in ipairs(self._rgbList) do
-		if e.tween then
-			e.tween:Cancel()
-		end
-	end
-	self._rgbList = {}
-	for _, conn in ipairs(self._conns) do
-		pcall(function()
-			conn:Disconnect()
-		end)
-	end
-	self._conns = {}
-	if self.Gui then
-		self.Gui:Destroy()
-		self.Gui = nil
-	end
-	for i, w in ipairs(Library.Windows) do
-		if w == self then
-			table.remove(Library.Windows, i)
-			break
-		end
-	end
-	if #Library.Windows == 0 then
-		PERF.low = false
-	end
-end
-
-function Window:Notify(o)
-	o = o or {}
-	self._notifyOrder += 1
-	local card = New("Frame", {
-		Size = UDim2.new(1, 0, 0, 0),
-		AutomaticSize = Enum.AutomaticSize.Y,
-		BackgroundColor3 = Theme.Card,
-		BorderSizePixel = 0,
-		LayoutOrder = self._notifyOrder,
-		Parent = self._notifyHolder,
-	}, {
-		Corner(12),
-		Stroke(Theme.Border, 1, 0),
-	})
-	New("Frame", {
-		Size = UDim2.new(0, 3, 1, -16),
-		Position = UDim2.fromOffset(8, 8),
-		BackgroundColor3 = Color3.new(1, 1, 1),
-		BorderSizePixel = 0,
-		Parent = card,
-	}, { Corner(2), Accent(90) })
-	local body = New("Frame", {
-		Size = UDim2.new(1, 0, 0, 0),
-		AutomaticSize = Enum.AutomaticSize.Y,
-		BackgroundTransparency = 1,
-		Parent = card,
-	}, {
-		Pad(24, 11, 14, 11),
-		New("UIListLayout", { Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder }),
-	})
-	New("TextLabel", {
-		Size = UDim2.new(1, 0, 0, 0),
-		AutomaticSize = Enum.AutomaticSize.Y,
-		BackgroundTransparency = 1,
-		Font = FONT.Semi,
-		TextSize = 14,
-		TextColor3 = Theme.Text,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		TextWrapped = true,
-		Text = tostring(o.Title or "Notifikasi"),
-		LayoutOrder = 1,
-		Parent = body,
-	})
-	if o.Content then
-		New("TextLabel", {
-			Size = UDim2.new(1, 0, 0, 0),
-			AutomaticSize = Enum.AutomaticSize.Y,
-			BackgroundTransparency = 1,
-			Font = FONT.Regular,
-			TextSize = 12,
-			TextColor3 = Theme.SubText,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			TextWrapped = true,
-			Text = tostring(o.Content),
-			LayoutOrder = 2,
-			Parent = body,
-		})
-	end
-
-	-- Muncul & hilang dengan fade halus
-	local labels = {}
-	for _, d in ipairs(body:GetChildren()) do
-		if d:IsA("TextLabel") then
-			table.insert(labels, d)
-			d.TextTransparency = 1
-		end
-	end
-	card.BackgroundTransparency = 1
-	Tween(card, 0.22, { BackgroundTransparency = 0.08 })
-	for _, l in ipairs(labels) do
-		Tween(l, 0.22, { TextTransparency = 0 })
-	end
-	task.delay(o.Duration or 4, function()
-		if not (card and card.Parent) then
-			return
-		end
-		Tween(card, 0.25, { BackgroundTransparency = 1 })
-		for _, l in ipairs(labels) do
-			if l.Parent then
-				Tween(l, 0.25, { TextTransparency = 1 })
-			end
-		end
-		task.delay(0.27, function()
-			if card and card.Parent then
-				card:Destroy()
-			end
-		end)
-	end)
-end
-
-function Window:SaveConfig(name)
-	if typeof(writefile) ~= "function" then
-		return false, "executor tidak mendukung writefile"
-	end
-	local ok, err = pcall(function()
-		if typeof(isfolder) == "function" and typeof(makefolder) == "function" and not isfolder(self._folder) then
-			makefolder(self._folder)
-		end
-		writefile(self._folder .. "/" .. tostring(name or "default") .. ".json", HttpService:JSONEncode(self.Flags))
-	end)
-	return ok, err
-end
-
-function Window:LoadConfig(name)
-	if typeof(readfile) ~= "function" or typeof(isfile) ~= "function" then
-		return false, "executor tidak mendukung readfile/isfile"
-	end
-	local path = self._folder .. "/" .. tostring(name or "default") .. ".json"
-	if not isfile(path) then
-		return false, "file config tidak ditemukan"
-	end
-	local ok, data = pcall(function()
-		return HttpService:JSONDecode(readfile(path))
-	end)
-	if not ok or type(data) ~= "table" then
-		return false, "file config rusak"
-	end
-	for flag, value in pairs(data) do
-		local setter = self._setters[flag]
-		if setter then
-			pcall(setter, value)
-		end
-	end
-	return true
-end
-
-function Window:_select(tab)
-	if self._closePopup then
-		self._closePopup()
-	end
-	local changed = self._activeTab ~= tab
-	local activeT = math.max(self._fieldT - 0.15, 0.1)
-	for _, t in ipairs(self._tabs) do
-		local active = (t == tab)
-		t.Page.Visible = active
-		Tween(t.Button, 0.15, { BackgroundTransparency = active and activeT or 1 })
-		t._indicator.Visible = active
-		if t._rgbEntry then
-			t._rgbEntry.active = active
-			self:_syncRGB(t._rgbEntry)
-		end
-		t._label.TextColor3 = active and Theme.Text or Theme.SubText
-		t._badgeGrad.Enabled = active
-		t._badge.BackgroundColor3 = active and Color3.new(1, 1, 1) or Theme.Secondary
-		t._badgeLbl.TextColor3 = active and Color3.new(1, 1, 1) or Theme.SubText
-		if t._icon then
-			t._icon.ImageColor3 = active and Color3.new(1, 1, 1) or Theme.SubText
-		end
-	end
-	self._activeTab = tab
-	if changed then
-		tab.Page.Position = UDim2.fromOffset(18, 0)
-		Tween(tab.Page, 0.2, { Position = UDim2.fromOffset(0, 0) })
-	end
-	tab:_applySearch(self._searchBox.Text)
-end
-
-function Window:AddTab(opts)
-	if type(opts) == "string" then
-		opts = { Name = opts }
-	end
-	opts = opts or {}
-
-	local tab = setmetatable({}, Tab)
-	tab.Window = self
-	tab.Name = tostring(opts.Name or "Tab")
-	tab._items = {}
-	tab._sections = {}
-	tab._currentSection = nil
-	tab._order = 1
-
-	tab.Button = New("TextButton", {
-		Size = UDim2.new(1, 0, 0, 42),
-		BackgroundColor3 = Theme.Secondary,
-		BackgroundTransparency = 1,
-		Text = "",
-		AutoButtonColor = false,
-		LayoutOrder = #self._tabs + 1,
-		Parent = self._tabList,
-	}, { Corner(10) })
-
-	local indicatorGrad = Accent(90)
-	tab._rgbEntry = self:_regControl(indicatorGrad, false)
-	tab._indicator = New("Frame", {
-		AnchorPoint = Vector2.new(0, 0.5),
-		Position = UDim2.new(0, 0, 0.5, 0),
-		Size = UDim2.fromOffset(3, 20),
-		BackgroundColor3 = Color3.new(1, 1, 1),
-		BorderSizePixel = 0,
-		Visible = false,
-		Parent = tab.Button,
-	}, { Corner(2), indicatorGrad })
-
-	-- Lencana ikon: hanya tampil kalau Icon diberikan; tanpa Icon tab berupa teks saja
-	tab._badge = New("Frame", {
-		AnchorPoint = Vector2.new(0, 0.5),
-		Position = UDim2.new(0, 12, 0.5, 0),
-		Size = UDim2.fromOffset(26, 26),
-		BackgroundColor3 = Theme.Secondary,
-		BorderSizePixel = 0,
-		Visible = opts.Icon ~= nil,
-		Parent = tab.Button,
-	}, { Corner(8) })
-	tab._badgeGrad = Accent(45)
-	tab._badgeGrad.Enabled = false
-	tab._badgeGrad.Parent = tab._badge
-	tab._badgeLbl = New("TextLabel", {
-		BackgroundTransparency = 1,
-		Size = UDim2.fromScale(1, 1),
-		Font = FONT.Bold,
-		TextSize = 13,
-		TextColor3 = Theme.SubText,
-		Text = "",
-		Parent = tab._badge,
-	})
-	if opts.Icon then
-		tab._badgeLbl.Text = ""
-		tab._icon = New("ImageLabel", {
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			Position = UDim2.fromScale(0.5, 0.5),
-			Size = UDim2.fromOffset(16, 16),
-			BackgroundTransparency = 1,
-			Image = ToAsset(opts.Icon),
-			ImageColor3 = Theme.SubText,
-			Parent = tab._badge,
-		})
-	end
-
-	tab._label = New("TextLabel", {
-		BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(opts.Icon and 48 or 16, 0),
-		Size = UDim2.new(1, opts.Icon and -54 or -22, 1, 0),
-		Font = FONT.Semi,
-		TextSize = 14,
-		TextColor3 = Theme.SubText,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		TextTruncate = Enum.TextTruncate.AtEnd,
-		Text = tab.Name,
-		Parent = tab.Button,
-	})
-
-	tab.Page = New("ScrollingFrame", {
-		Size = UDim2.fromScale(1, 1),
-		BackgroundTransparency = 1,
-		BorderSizePixel = 0,
-		ScrollBarThickness = 3,
-		ScrollBarImageColor3 = Theme.Blue,
-		CanvasSize = UDim2.new(),
-		AutomaticCanvasSize = Enum.AutomaticSize.Y,
-		ScrollingDirection = Enum.ScrollingDirection.Y,
-		Visible = false,
-		Parent = self._content,
-	}, {
-		New("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }),
-		Pad(0, 0, 8, 12),
-	})
-
-	tab.Button.MouseButton1Click:Connect(function()
-		self:_select(tab)
-	end)
-
-	table.insert(self._tabs, tab)
-	if #self._tabs == 1 then
-		self:_select(tab)
-	end
-	return tab
-end
-
---// ===== 4. Tab + komponen =====
+--// ===== 6. Tab + komponen =====
 
 function Tab:_row(height, searchText)
 	local rowStroke = Stroke(Theme.Glow, 1, 0.72)
@@ -1239,12 +1358,14 @@ function Tab:_row(height, searchText)
 	return row
 end
 
--- Judul dua tingkat: teks utama + deskripsi sekunder
-function Tab:_title(row, name, desc, rightInset)
+-- Judul dua tingkat: teks utama + deskripsi sekunder.
+-- scaleW (opsional): lebar judul sebagai proporsi baris, untuk kontrol yang melebar-menyempit.
+function Tab:_title(row, name, desc, rightInset, scaleW)
+	local wScale = scaleW or 1
 	New("TextLabel", {
 		BackgroundTransparency = 1,
 		Position = UDim2.fromOffset(14, desc and 8 or 0),
-		Size = desc and UDim2.new(1, rightInset, 0, 20) or UDim2.new(1, rightInset, 1, 0),
+		Size = desc and UDim2.new(wScale, rightInset, 0, 20) or UDim2.new(wScale, rightInset, 1, 0),
 		Font = FONT.Semi,
 		TextSize = 14,
 		TextColor3 = Theme.Text,
@@ -1257,7 +1378,7 @@ function Tab:_title(row, name, desc, rightInset)
 		New("TextLabel", {
 			BackgroundTransparency = 1,
 			Position = UDim2.fromOffset(14, 29),
-			Size = UDim2.new(1, rightInset, 0, 16),
+			Size = UDim2.new(wScale, rightInset, 0, 16),
 			Font = FONT.Regular,
 			TextSize = 12,
 			TextColor3 = Theme.SubText,
@@ -1353,9 +1474,9 @@ function Tab:AddButton(o)
 		Text = "",
 		Parent = row,
 	})
-	Pressable(btn, row, Theme.Card, Theme.Secondary)
+	Pressable(btn, row, Theme.Card, Theme.Hover)
 	btn.MouseButton1Down:Connect(function()
-		Tween(arrow, 0.08, { TextColor3 = Theme.Blue })
+		Tween(arrow, 0.08, { TextColor3 = Theme.Cyan })
 	end)
 	local function releaseArrow()
 		Tween(arrow, 0.18, { TextColor3 = Theme.SubText })
@@ -1387,14 +1508,14 @@ function Tab:AddToggle(o)
 		BorderSizePixel = 0,
 		Parent = row,
 	}, { Corner(0, 1) })
-	local switchGrad = Accent(0)
+	local switchGrad = Gradient(0)
 	switchGrad.Enabled = false
 	switchGrad.Parent = switch
 	local rgbEntry = window:_regControl(switchGrad, false)
 	local knob = New("Frame", {
 		Position = UDim2.fromOffset(3, 3),
 		Size = UDim2.fromOffset(20, 20),
-		BackgroundColor3 = Theme.Text,
+		BackgroundColor3 = Theme.Soft,
 		BorderSizePixel = 0,
 		Parent = switch,
 	}, { Corner(0, 1) })
@@ -1404,7 +1525,7 @@ function Tab:AddToggle(o)
 		Text = "",
 		Parent = row,
 	})
-	Pressable(btn, row, Theme.Card, Theme.Secondary)
+	Pressable(btn, row, Theme.Card, Theme.Hover)
 
 	local value = o.Default == true
 	local function render(animate)
@@ -1499,11 +1620,11 @@ function Tab:AddSlider(o)
 		Position = UDim2.fromOffset(14, 44),
 		Size = UDim2.new(1, -28, 0, 6),
 		BackgroundColor3 = Theme.Secondary,
-		BackgroundTransparency = 0.15,
+		BackgroundTransparency = 0.1,
 		BorderSizePixel = 0,
 		Parent = row,
 	}, { Corner(0, 1) })
-	local fillGrad = Accent(0)
+	local fillGrad = Gradient(0)
 	window:_regControl(fillGrad, true)
 	local fill = New("Frame", {
 		Size = UDim2.fromScale(0, 1),
@@ -1515,7 +1636,7 @@ function Tab:AddSlider(o)
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0, 0.5),
 		Size = UDim2.fromOffset(18, 18),
-		BackgroundColor3 = Theme.Text,
+		BackgroundColor3 = Theme.Soft,
 		BorderSizePixel = 0,
 		Parent = track,
 	}, { Corner(0, 1), Stroke(Theme.Blue, 2, 0) })
@@ -1591,12 +1712,12 @@ function Tab:AddInput(o)
 	o = o or {}
 	local window = self.Window
 	local row = self:_row(52, o.Name or "")
-	self:_title(row, o.Name or "Input", nil, -190)
+	self:_title(row, o.Name or "Input", nil, -14, 0.52)
 
 	local box = New("TextBox", {
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, -12, 0.5, 0),
-		Size = UDim2.fromOffset(168, 34),
+		Size = UDim2.new(0.44, 0, 0, 34),
 		BackgroundColor3 = Theme.Secondary,
 		BackgroundTransparency = window._fieldT,
 		Font = FONT.Regular,
@@ -1612,6 +1733,7 @@ function Tab:AddInput(o)
 		Corner(9),
 		Pad(12, 0, 12, 0),
 		Stroke(Theme.Glow, 1, 0.65),
+		New("UISizeConstraint", { MinSize = Vector2.new(110, 34), MaxSize = Vector2.new(200, 34) }),
 	})
 	local boxStroke = box:FindFirstChildOfClass("UIStroke")
 	box.Focused:Connect(function()
@@ -1677,12 +1799,12 @@ function Tab:AddDropdown(o)
 	local popup, blocker
 
 	local row = self:_row(52, o.Name or "")
-	self:_title(row, o.Name or "Dropdown", nil, -204)
+	self:_title(row, o.Name or "Dropdown", nil, -14, 0.52)
 
 	local valueBox = New("Frame", {
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, -12, 0.5, 0),
-		Size = UDim2.fromOffset(180, 34),
+		Size = UDim2.new(0.44, 0, 0, 34),
 		BackgroundColor3 = Theme.Secondary,
 		BackgroundTransparency = window._fieldT,
 		BorderSizePixel = 0,
@@ -1690,11 +1812,12 @@ function Tab:AddDropdown(o)
 	}, {
 		Corner(9),
 		Stroke(Theme.Glow, 1, 0.65),
+		New("UISizeConstraint", { MinSize = Vector2.new(116, 34), MaxSize = Vector2.new(200, 34) }),
 	})
 	local valueLbl = New("TextLabel", {
 		BackgroundTransparency = 1,
 		Position = UDim2.fromOffset(12, 0),
-		Size = UDim2.new(1, -34, 1, 0),
+		Size = UDim2.new(1, -36, 1, 0),
 		Font = FONT.Medium,
 		TextSize = 13,
 		TextColor3 = Theme.Text,
@@ -1703,10 +1826,11 @@ function Tab:AddDropdown(o)
 		Text = "None",
 		Parent = valueBox,
 	})
+	-- Panah berputar 180 derajat saat dropdown terbuka
 	local arrow = New("TextLabel", {
-		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, -10, 0, 0),
-		Size = UDim2.fromOffset(14, 34),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(1, -16, 0.5, 0),
+		Size = UDim2.fromOffset(14, 14),
 		BackgroundTransparency = 1,
 		Font = FONT.Bold,
 		TextSize = 12,
@@ -1720,7 +1844,7 @@ function Tab:AddDropdown(o)
 		Text = "",
 		Parent = row,
 	})
-	Pressable(header, row, Theme.Card, Theme.Secondary)
+	Pressable(header, row, Theme.Card, Theme.Hover)
 
 	local function currentList()
 		local out = {}
@@ -1775,7 +1899,7 @@ function Tab:AddDropdown(o)
 			blocker:Destroy()
 			blocker = nil
 		end
-		arrow.Text = "v"
+		Tween(arrow, 0.15, { Rotation = 0 })
 		if window._closePopup == closePopup then
 			window._closePopup = nil
 		end
@@ -1803,13 +1927,13 @@ function Tab:AddDropdown(o)
 		end
 	end
 
-	-- Daftar pilihan = popup melayang di bawah (atau di atas) kotak nilai, dengan area gulir.
+	-- Daftar pilihan = popup melayang di bawah (atau di atas) kotak nilai, membuka dengan animasi.
 	local function openPopup()
 		if window._closePopup then
 			window._closePopup()
 		end
 		open = true
-		arrow.Text = "^"
+		Tween(arrow, 0.15, { Rotation = 180 })
 		window._closePopup = closePopup
 
 		local s = window._scale.Scale
@@ -1821,7 +1945,7 @@ function Tab:AddDropdown(o)
 		local belowY = (vbPos.Y + vbSize.Y + 6 - mainPos.Y) / s
 		local aboveBottom = (vbPos.Y - 6 - mainPos.Y) / s
 		local spaceBelow = mainSize.Y / s - belowY - 8
-		local spaceAbove = aboveBottom - 60
+		local spaceAbove = aboveBottom - 64
 		local h, y
 		if spaceBelow >= wantH or spaceBelow >= spaceAbove then
 			h = math.min(wantH, math.max(spaceBelow, 70))
@@ -1842,19 +1966,21 @@ function Tab:AddDropdown(o)
 
 		popup = New("Frame", {
 			Position = UDim2.fromOffset(relX, y),
-			Size = UDim2.fromOffset(width, h),
+			Size = UDim2.fromOffset(width, 0),
 			BackgroundColor3 = Theme.Secondary,
-			BackgroundTransparency = 0.06,
+			BackgroundTransparency = 0.04,
 			BorderSizePixel = 0,
+			ClipsDescendants = true,
 			ZIndex = 50,
 			Parent = main,
 		}, {
 			Corner(10),
 			Stroke(Theme.Blue, 1, 0.5),
 		})
+		Tween(popup, 0.16, { Size = UDim2.fromOffset(width, h) })
 
 		local list = New("ScrollingFrame", {
-			Size = UDim2.fromScale(1, 1),
+			Size = UDim2.new(1, 0, 0, h),
 			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
 			ScrollBarThickness = 3,
@@ -1890,7 +2016,7 @@ function Tab:AddDropdown(o)
 				Text = opt,
 				Parent = btn,
 			})
-			local markChildren = { Accent(45) }
+			local markChildren = { Gradient(45) }
 			if multi then
 				table.insert(markChildren, Corner(5))
 				table.insert(markChildren, Stroke(Theme.Off, 1.5, 0))
