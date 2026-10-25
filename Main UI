@@ -1,5 +1,6 @@
---// MouseUI v1.1 | UI library universal (gaya redz Hub / Banana Cat Hub)
---// Simpan sebagai MouseUI.lua di GitHub, muat lewat loadstring(game:HttpGet(URL))()
+--// MouseUI v1.2 | UI library universal (gaya redz Hub / Banana Cat Hub)
+--// Muat lewat: loadstring(game:HttpGet(URL))()
+--// Perubahan v1.2: ikon dimuat dari file lokal -> URL -> ID asset (huruf "M" jadi cadangan).
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -9,7 +10,7 @@ local HttpService = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
 
-local Library = { Version = "1.1.0", Windows = {} }
+local Library = { Version = "1.2.0", Windows = {} }
 
 local Theme = {
 	Background = Color3.fromRGB(22, 22, 26),
@@ -22,7 +23,11 @@ local Theme = {
 	Stroke = Color3.fromRGB(58, 58, 68),
 }
 Library.Theme = Theme -- ubah sebelum CreateWindow kalau mau ganti warna
-Library.DefaultIcon = 90803590596423 -- logo pedang biru-merah
+
+-- Sumber ikon (dicoba berurutan): file lokal -> URL -> ID asset
+Library.DefaultIconFile = nil -- contoh: "logo.png" (file di folder workspace executor)
+Library.DefaultIconURL = "https://raw.githubusercontent.com/bismaaaa20-cloud/GUI/refs/heads/main/logo_decal_1024.jpg"
+Library.DefaultIcon = 90803590596423 -- ID asset logo pedang biru-merah (cadangan terakhir)
 
 local SCALES = { Small = 0.8, Medium = 1, Large = 1.2 }
 local FONT = {
@@ -99,6 +104,38 @@ local function ToAsset(icon)
 		return "rbxassetid://" .. tostring(icon)
 	end
 	return tostring(icon)
+end
+
+-- Urutan sumber ikon: file lokal -> URL -> ID asset. Mengembalikan (asset, namaSumber).
+local function ResolveIcon(icon, file, url)
+	if typeof(getcustomasset) == "function" then
+		if file and file ~= "" and typeof(isfile) == "function" then
+			local ok, res = pcall(function()
+				if isfile(file) then
+					return getcustomasset(file)
+				end
+			end)
+			if ok and res then
+				return res, "file"
+			end
+		end
+		if url and url ~= "" and typeof(writefile) == "function" then
+			local ok, res = pcall(function()
+				if typeof(isfolder) == "function" and typeof(makefolder) == "function" and not isfolder("MouseUI") then
+					makefolder("MouseUI")
+				end
+				local ext = tostring(url):match("%.(%w+)$") or "png"
+				local path = "MouseUI/icon." .. ext
+				writefile(path, game:HttpGet(url))
+				return getcustomasset(path)
+			end)
+			if ok and res then
+				return res, "url"
+			end
+			warn("[MouseUI] gagal memuat IconURL, mencoba ID asset")
+		end
+	end
+	return ToAsset(icon), "id"
 end
 
 local function GetGuiParent()
@@ -182,6 +219,7 @@ function Library:CreateWindow(opts)
 	local self = setmetatable({}, Window)
 	self.Title = tostring(opts.Title or "MouseUI")
 	self.Flags = {}
+	self.IconSource = "none"
 	self._conns = {}
 	self._tabs = {}
 	self._setters = {}
@@ -192,6 +230,7 @@ function Library:CreateWindow(opts)
 		self._folder = tostring(opts.ConfigFolder)
 	end
 
+	-- Icon = false mematikan gambar ikon (tetap tampil huruf "M")
 	local icon = opts.Icon
 	if icon == nil then
 		icon = Library.DefaultIcon
@@ -357,16 +396,16 @@ function Library:CreateWindow(opts)
 	})
 	self._notifyOrder = 0
 
-	--// Floating icon (buka/tutup UI)
+	--// Floating icon (buka/tutup UI). Huruf "M" tetap ada di bawah gambar sebagai cadangan.
 	local iconBtn = New("TextButton", {
 		Name = "ToggleIcon",
 		Size = UDim2.fromOffset(50, 50),
 		Position = UDim2.new(0.5, -25, 0, 14),
 		BackgroundColor3 = Color3.fromRGB(0, 0, 0),
 		AutoButtonColor = false,
-		Text = icon and "" or "M",
+		Text = "M",
 		Font = FONT.Bold,
-		TextSize = 20,
+		TextSize = 22,
 		TextColor3 = Theme.Text,
 		ClipsDescendants = true,
 		Parent = gui,
@@ -380,13 +419,24 @@ function Library:CreateWindow(opts)
 		}),
 	})
 	if icon then
-		New("ImageLabel", {
+		local asset, source = ResolveIcon(
+			icon,
+			opts.IconFile or Library.DefaultIconFile,
+			opts.IconURL or Library.DefaultIconURL
+		)
+		self.IconSource = source
+		local img = New("ImageLabel", {
 			BackgroundTransparency = 1,
 			Size = UDim2.fromScale(1, 1),
-			Image = ToAsset(icon),
+			Image = asset,
 			ScaleType = Enum.ScaleType.Crop,
 			Parent = iconBtn,
 		}, { Corner(0, 1) })
+		task.delay(6, function()
+			if img.Parent and not img.IsLoaded then
+				warn("[MouseUI] gambar ikon belum termuat (sumber: " .. source .. "). Kalau 'id', kemungkinan itu ID decal.")
+			end
+		end)
 	end
 
 	local function track(conn)
