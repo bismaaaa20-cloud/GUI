@@ -1,5 +1,6 @@
---// MouseUI v1.4 | UI library universal (gaya redz Hub / Banana Cat Hub)
+--// MouseUI v1.5 | UI library universal (gaya redz Hub / Banana Cat Hub)
 --// Muat lewat: loadstring(game:HttpGet(URL))()
+--// v1.5: dropdown jadi popup melayang (bukan daftar tertanam), kartu profil di sidebar.
 --// v1.4: tombol logo (bulat) lebih besar, panel & tepinya sedikit transparan.
 --//       Atur lewat opts atau Library.PanelTransparency / Library.IconSize.
 --// v1.3: tema neon biru-merah dari logo, gradasi, ukuran panel menyesuaikan layar.
@@ -12,7 +13,7 @@ local HttpService = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
 
-local Library = { Version = "1.4.0", Windows = {} }
+local Library = { Version = "1.5.0", Windows = {} }
 
 local Theme = {
 	Background = Color3.fromRGB(7, 7, 15),
@@ -458,7 +459,7 @@ function Library:CreateWindow(opts)
 
 	self._tabList = New("ScrollingFrame", {
 		Position = UDim2.fromOffset(0, 48),
-		Size = UDim2.new(1, -1, 1, -52),
+		Size = UDim2.new(1, -1, 1, -112),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		ScrollBarThickness = 0,
@@ -468,6 +469,51 @@ function Library:CreateWindow(opts)
 	}, {
 		New("UIListLayout", { Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder }),
 		Pad(10, 2, 10, 6),
+	})
+
+	--// Kartu profil (avatar + nama) di dasar sidebar
+	local profile = New("Frame", {
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.new(0, 10, 1, -10),
+		Size = UDim2.new(1, -21, 0, 48),
+		BackgroundColor3 = Theme.Element,
+		BorderSizePixel = 0,
+		Parent = sidebar,
+	}, {
+		Corner(10),
+		New("UIStroke", { Color = Theme.Stroke, Thickness = 1, Transparency = 0.35 }),
+	})
+	New("ImageLabel", {
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 8, 0.5, 0),
+		Size = UDim2.fromOffset(32, 32),
+		BackgroundColor3 = Theme.Background,
+		Image = string.format("rbxthumb://type=AvatarHeadShot&id=%d&w=150&h=150", LocalPlayer.UserId),
+		Parent = profile,
+	}, { Corner(0, 1), GradStroke(1.5, 45) })
+	New("TextLabel", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(48, 7),
+		Size = UDim2.new(1, -54, 0, 18),
+		Font = FONT.Bold,
+		TextSize = 12,
+		TextColor3 = Theme.Text,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Text = LocalPlayer.DisplayName,
+		Parent = profile,
+	})
+	New("TextLabel", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(48, 25),
+		Size = UDim2.new(1, -54, 0, 16),
+		Font = FONT.Regular,
+		TextSize = 11,
+		TextColor3 = Theme.SubText,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Text = "@" .. LocalPlayer.Name,
+		Parent = profile,
 	})
 
 	--// Content
@@ -579,6 +625,9 @@ function Window:Toggle(state)
 		state = not self._visible
 	end
 	self._visible = state
+	if not state and self._closePopup then
+		self._closePopup()
+	end
 	self.Main.Visible = state
 end
 
@@ -689,6 +738,9 @@ function Window:LoadConfig(name)
 end
 
 function Window:_select(tab)
+	if self._closePopup then
+		self._closePopup()
+	end
 	for _, t in ipairs(self._tabs) do
 		local active = (t == tab)
 		t.Page.Visible = active
@@ -1216,8 +1268,9 @@ end
 function Tab:AddDropdown(o)
 	o = o or {}
 	local window = self.Window
+	local main = window.Main
 	local multi = o.Multi == true
-	local OPT_H, MAX_VISIBLE = 30, 5
+	local OPT_H, MAX_VISIBLE = 32, 6
 
 	local options = {}
 	for _, v in ipairs(o.Options or {}) do
@@ -1226,27 +1279,27 @@ function Tab:AddDropdown(o)
 	local single = nil
 	local set = {}
 	local open = false
-	local optButtons = {}
+	local entries = {}
+	local popup, blocker
 
 	local row = self:_row(44, o.Name or "")
-	row.ClipsDescendants = true
-	self:_title(row, o.Name or "Dropdown", nil, -190)
+	self:_title(row, o.Name or "Dropdown", nil, -196)
 
 	local valueBox = New("Frame", {
-		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, -12, 0, 8),
-		Size = UDim2.fromOffset(166, 28),
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -12, 0.5, 0),
+		Size = UDim2.fromOffset(172, 30),
 		BackgroundColor3 = Theme.Background,
 		BorderSizePixel = 0,
 		Parent = row,
 	}, {
-		Corner(7),
+		Corner(8),
 		New("UIStroke", { Color = Theme.Stroke, Thickness = 1 }),
 	})
 	local valueLbl = New("TextLabel", {
 		BackgroundTransparency = 1,
 		Position = UDim2.fromOffset(10, 0),
-		Size = UDim2.new(1, -30, 1, 0),
+		Size = UDim2.new(1, -32, 1, 0),
 		Font = FONT.Medium,
 		TextSize = 13,
 		TextColor3 = Theme.Text,
@@ -1257,33 +1310,17 @@ function Tab:AddDropdown(o)
 	})
 	local arrow = New("TextLabel", {
 		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, -8, 0, 0),
-		Size = UDim2.fromOffset(14, 28),
+		Position = UDim2.new(1, -9, 0, 0),
+		Size = UDim2.fromOffset(14, 30),
 		BackgroundTransparency = 1,
 		Font = FONT.Bold,
 		TextSize = 12,
-		TextColor3 = Color3.new(1, 1, 1),
+		TextColor3 = Theme.SubText,
 		Text = "v",
 		Parent = valueBox,
-	}, { Gradient(0) })
-	local list = New("ScrollingFrame", {
-		Position = UDim2.fromOffset(10, 48),
-		Size = UDim2.new(1, -20, 0, 0),
-		BackgroundColor3 = Theme.Background,
-		BorderSizePixel = 0,
-		ScrollBarThickness = 3,
-		ScrollBarImageColor3 = Theme.Blue,
-		CanvasSize = UDim2.new(),
-		AutomaticCanvasSize = Enum.AutomaticSize.Y,
-		Visible = false,
-		Parent = row,
-	}, {
-		Corner(7),
-		New("UIListLayout", { Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder }),
-		Pad(3, 3, 3, 3),
 	})
 	local header = New("TextButton", {
-		Size = UDim2.new(1, 0, 0, 44),
+		Size = UDim2.fromScale(1, 1),
 		BackgroundTransparency = 1,
 		Text = "",
 		Parent = row,
@@ -1304,6 +1341,12 @@ function Tab:AddDropdown(o)
 		end
 		return single
 	end
+	local function isSelected(opt)
+		if multi then
+			return set[opt] == true
+		end
+		return single == opt
+	end
 	local function updateText()
 		if multi then
 			local l = currentList()
@@ -1313,30 +1356,33 @@ function Tab:AddDropdown(o)
 		end
 	end
 	local function paintOptions()
-		for opt, b in pairs(optButtons) do
-			local selected
+		for opt, e in pairs(entries) do
+			local sel = isSelected(opt)
+			e.btn.BackgroundTransparency = sel and 0 or 1
+			e.lbl.TextColor3 = sel and Theme.Blue or Theme.Text
 			if multi then
-				selected = set[opt] == true
+				e.mark.BackgroundTransparency = sel and 0 or 1
 			else
-				selected = single == opt
+				e.mark.Visible = sel
 			end
-			local grad = b:FindFirstChildOfClass("UIGradient")
-			if grad then
-				grad.Enabled = selected
-			end
-			b.BackgroundColor3 = selected and Color3.new(1, 1, 1) or Theme.Element
-			b.TextColor3 = selected and Color3.new(1, 1, 1) or Theme.Text
 		end
 	end
-	local function listHeight()
-		return math.min(#options, MAX_VISIBLE) * (OPT_H + 3) + 6
-	end
-	local function resize()
-		local h = open and (48 + listHeight() + 10) or 44
-		list.Visible = open
-		list.Size = UDim2.new(1, -20, 0, listHeight())
-		arrow.Text = open and "^" or "v"
-		Tween(row, 0.16, { Size = UDim2.new(1, 0, 0, h) })
+
+	local function closePopup()
+		open = false
+		entries = {}
+		if popup then
+			popup:Destroy()
+			popup = nil
+		end
+		if blocker then
+			blocker:Destroy()
+			blocker = nil
+		end
+		arrow.Text = "v"
+		if window._closePopup == closePopup then
+			window._closePopup = nil
+		end
 	end
 
 	local obj = {}
@@ -1361,46 +1407,137 @@ function Tab:AddDropdown(o)
 		end
 	end
 
-	local function build()
-		for _, c in ipairs(list:GetChildren()) do
-			if c:IsA("TextButton") then
-				c:Destroy()
-			end
+	-- Daftar pilihan tampil sebagai popup melayang di bawah (atau di atas) kotak nilai.
+	local function openPopup()
+		if window._closePopup then
+			window._closePopup()
 		end
-		optButtons = {}
+		open = true
+		arrow.Text = "^"
+		window._closePopup = closePopup
+
+		local s = window._scale.Scale
+		local vbPos, vbSize = valueBox.AbsolutePosition, valueBox.AbsoluteSize
+		local mainPos, mainSize = main.AbsolutePosition, main.AbsoluteSize
+		local width = vbSize.X / s
+		local wantH = math.min(#options, MAX_VISIBLE) * (OPT_H + 3) + 10
+		local relX = (vbPos.X - mainPos.X) / s
+		local belowY = (vbPos.Y + vbSize.Y + 4 - mainPos.Y) / s
+		local aboveBottom = (vbPos.Y - 4 - mainPos.Y) / s
+		local spaceBelow = mainSize.Y / s - belowY - 6
+		local spaceAbove = aboveBottom - 52
+		local h, y
+		if spaceBelow >= wantH or spaceBelow >= spaceAbove then
+			h = math.min(wantH, math.max(spaceBelow, 60))
+			y = belowY
+		else
+			h = math.min(wantH, math.max(spaceAbove, 60))
+			y = aboveBottom - h
+		end
+
+		blocker = New("TextButton", {
+			Size = UDim2.fromScale(1, 1),
+			BackgroundTransparency = 1,
+			Text = "",
+			ZIndex = 40,
+			Parent = main,
+		})
+		blocker.MouseButton1Click:Connect(closePopup)
+
+		popup = New("Frame", {
+			Position = UDim2.fromOffset(relX, y),
+			Size = UDim2.fromOffset(width, h),
+			BackgroundColor3 = Theme.Element,
+			BorderSizePixel = 0,
+			ZIndex = 50,
+			Parent = main,
+		}, {
+			Corner(8),
+			New("UIStroke", { Color = Theme.Blue, Thickness = 1, Transparency = 0.45 }),
+		})
+
+		local list = New("ScrollingFrame", {
+			Size = UDim2.fromScale(1, 1),
+			BackgroundTransparency = 1,
+			BorderSizePixel = 0,
+			ScrollBarThickness = 3,
+			ScrollBarImageColor3 = Theme.Blue,
+			CanvasSize = UDim2.new(),
+			AutomaticCanvasSize = Enum.AutomaticSize.Y,
+			Parent = popup,
+		}, {
+			New("UIListLayout", { Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder }),
+			Pad(5, 5, 5, 5),
+		})
+
+		entries = {}
 		for i, opt in ipairs(options) do
-			local grad = Gradient(0)
-			grad.Enabled = false
-			local b = New("TextButton", {
+			local btn = New("TextButton", {
 				Size = UDim2.new(1, 0, 0, OPT_H),
-				BackgroundColor3 = Theme.Element,
+				BackgroundColor3 = Theme.ElementHover,
+				BackgroundTransparency = 1,
 				AutoButtonColor = false,
-				Font = FONT.Medium,
-				TextSize = 13,
-				Text = opt,
-				TextColor3 = Theme.Text,
+				Text = "",
 				LayoutOrder = i,
 				Parent = list,
-			}, { Corner(6), grad })
-			optButtons[opt] = b
-			b.MouseButton1Click:Connect(function()
+			}, { Corner(6) })
+			local lbl = New("TextLabel", {
+				BackgroundTransparency = 1,
+				Position = UDim2.fromOffset(12, 0),
+				Size = UDim2.new(1, -44, 1, 0),
+				Font = FONT.Medium,
+				TextSize = 13,
+				TextColor3 = Theme.Text,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+				Text = opt,
+				Parent = btn,
+			})
+			local markChildren = { Gradient(45) }
+			if multi then
+				table.insert(markChildren, Corner(4))
+				table.insert(markChildren, New("UIStroke", { Color = Theme.Stroke, Thickness = 1.5 }))
+			else
+				table.insert(markChildren, Corner(0, 1))
+			end
+			local mark = New("Frame", {
+				AnchorPoint = Vector2.new(1, 0.5),
+				Position = UDim2.new(1, -10, 0.5, 0),
+				Size = multi and UDim2.fromOffset(16, 16) or UDim2.fromOffset(8, 8),
+				BackgroundColor3 = Color3.new(1, 1, 1),
+				BackgroundTransparency = multi and 1 or 0,
+				BorderSizePixel = 0,
+				Visible = multi,
+				Parent = btn,
+			}, markChildren)
+			entries[opt] = { btn = btn, lbl = lbl, mark = mark }
+
+			btn.MouseEnter:Connect(function()
+				if not isSelected(opt) then
+					btn.BackgroundTransparency = 0.55
+				end
+			end)
+			btn.MouseLeave:Connect(paintOptions)
+			btn.MouseButton1Click:Connect(function()
 				if multi then
 					set[opt] = (not set[opt]) or nil
 				else
 					single = opt
-					open = false
-					resize()
 				end
 				updateText()
 				paintOptions()
 				window:_flag(o.Flag, currentValue())
 				SafeCall(o.Callback, currentValue())
+				if not multi then
+					closePopup()
+				end
 			end)
 		end
 		paintOptions()
 	end
 
 	function obj:Refresh(newOptions, keep)
+		closePopup()
 		options = {}
 		for _, v in ipairs(newOptions or {}) do
 			table.insert(options, tostring(v))
@@ -1420,19 +1557,17 @@ function Tab:AddDropdown(o)
 			set = {}
 			single = nil
 		end
-		build()
 		updateText()
-		if open then
-			resize()
-		end
 	end
 
 	header.MouseButton1Click:Connect(function()
-		open = not open
-		resize()
+		if open then
+			closePopup()
+		else
+			openPopup()
+		end
 	end)
 
-	build()
 	if o.Default ~= nil then
 		obj:Set(o.Default, true)
 		task.defer(SafeCall, o.Callback, currentValue())
