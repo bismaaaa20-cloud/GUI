@@ -1,4 +1,4 @@
---// MouseUI v2.1 | UI library universal, desain "premium dark gaming"
+--// MouseUI v2.2 | UI library universal, desain "premium dark gaming"
 --// Muat lewat: loadstring(game:HttpGet(URL))()
 --// API sama dengan v1.x (CreateWindow / AddTab / AddSection / AddToggle / AddSlider /
 --// AddDropdown / AddInput / AddButton / AddLabel / Notify), jadi script lama tetap jalan.
@@ -17,7 +17,7 @@ local HttpService = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
 
-local Library = { Version = "2.1.0", Windows = {} }
+local Library = { Version = "2.2.0", Windows = {} }
 
 --// ===== 1. Theme & konfigurasi =====
 
@@ -48,7 +48,8 @@ Library.DefaultIcon = 90803590596423 -- ID asset logo (cadangan terakhir)
 Library.PanelTransparency = 0.2 -- latar panel utama
 Library.CardTransparency = 0.32 -- kartu: sidebar, baris fitur
 Library.FieldTransparency = 0.42 -- kolom: search, input, kotak dropdown, profil
-Library.IconSize = 70 -- diameter tombol logo bulat (piksel)
+Library.IconSize = 60 -- diameter tombol logo bulat (piksel)
+Library.IconZoom = 1.25 -- pembesaran gambar di dalam lingkaran (1 = apa adanya)
 
 -- Ukuran dasar panel. Skala akhir = menyesuaikan layar x pengali (Small/Medium/Large).
 local WIN_W, WIN_H = 620, 360
@@ -107,6 +108,14 @@ local function Gradient(rotation, fade)
 			NumberSequenceKeypoint.new(0, 0),
 			NumberSequenceKeypoint.new(1, 0.9),
 		}) or NumberSequence.new(0),
+		Rotation = rotation or 0,
+	})
+end
+
+-- Aksen kontrol: gradasi halus satu keluarga biru (lebih kalem daripada biru-ungu)
+local function Accent(rotation)
+	return New("UIGradient", {
+		Color = ColorSequence.new(Theme.Blue, Color3.fromHex("#6FA8FF")),
 		Rotation = rotation or 0,
 	})
 end
@@ -626,16 +635,19 @@ function Library:CreateWindow(opts)
 		Parent = gui,
 	}, {
 		Corner(0, 1),
-		GradStroke(3, 45),
+		GradStroke(2.5, 45),
 	})
 	if iconAsset then
+		local zoom = math.clamp(opts.IconZoom or Library.IconZoom, 1, 2)
 		local img = New("ImageLabel", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromScale(zoom, zoom),
 			BackgroundTransparency = 1,
-			Size = UDim2.fromScale(1, 1),
 			Image = iconAsset,
 			ScaleType = Enum.ScaleType.Crop,
 			Parent = iconBtn,
-		}, { Corner(0, 1) })
+		})
 		task.delay(6, function()
 			if img.Parent and not img.IsLoaded then
 				warn("[MouseUI] gambar ikon belum termuat (sumber: " .. iconSource .. "). Kalau 'id', kemungkinan itu ID decal.")
@@ -758,7 +770,7 @@ function Window:Notify(o)
 		BackgroundColor3 = Color3.new(1, 1, 1),
 		BorderSizePixel = 0,
 		Parent = card,
-	}, { Corner(2), Gradient(90) })
+	}, { Corner(2), Accent(90) })
 	local body = New("Frame", {
 		Size = UDim2.new(1, 0, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
@@ -923,18 +935,19 @@ function Window:AddTab(opts)
 		BorderSizePixel = 0,
 		Visible = false,
 		Parent = tab.Button,
-	}, { Corner(2), Gradient(90) })
+	}, { Corner(2), Accent(90) })
 
-	-- Lencana ikon seragam: gambar kalau Icon diberikan, kalau tidak huruf pertama nama tab
+	-- Lencana ikon: hanya tampil kalau Icon diberikan; tanpa Icon tab berupa teks saja
 	tab._badge = New("Frame", {
 		AnchorPoint = Vector2.new(0, 0.5),
 		Position = UDim2.new(0, 12, 0.5, 0),
 		Size = UDim2.fromOffset(26, 26),
 		BackgroundColor3 = Theme.Secondary,
 		BorderSizePixel = 0,
+		Visible = opts.Icon ~= nil,
 		Parent = tab.Button,
 	}, { Corner(8) })
-	tab._badgeGrad = Gradient(45)
+	tab._badgeGrad = Accent(45)
 	tab._badgeGrad.Enabled = false
 	tab._badgeGrad.Parent = tab._badge
 	tab._badgeLbl = New("TextLabel", {
@@ -943,7 +956,7 @@ function Window:AddTab(opts)
 		Font = FONT.Bold,
 		TextSize = 13,
 		TextColor3 = Theme.SubText,
-		Text = string.upper(string.sub(tab.Name, 1, 1)),
+		Text = "",
 		Parent = tab._badge,
 	})
 	if opts.Icon then
@@ -961,8 +974,8 @@ function Window:AddTab(opts)
 
 	tab._label = New("TextLabel", {
 		BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(48, 0),
-		Size = UDim2.new(1, -54, 1, 0),
+		Position = UDim2.fromOffset(opts.Icon and 48 or 16, 0),
+		Size = UDim2.new(1, opts.Icon and -54 or -22, 1, 0),
 		Font = FONT.Semi,
 		TextSize = 14,
 		TextColor3 = Theme.SubText,
@@ -1071,28 +1084,20 @@ end
 
 function Tab:AddSection(name)
 	local holder = New("Frame", {
-		Size = UDim2.new(1, 0, 0, 28),
+		Size = UDim2.new(1, 0, 0, 26),
 		BackgroundTransparency = 1,
 		LayoutOrder = self._order,
 		Parent = self.Page,
 	})
-	New("Frame", {
-		AnchorPoint = Vector2.new(0, 0.5),
-		Position = UDim2.new(0, 2, 0.5, 2),
-		Size = UDim2.fromOffset(3, 14),
-		BackgroundColor3 = Color3.new(1, 1, 1),
-		BorderSizePixel = 0,
-		Parent = holder,
-	}, { Corner(2), Gradient(90) })
 	New("TextLabel", {
 		BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(14, 2),
-		Size = UDim2.new(1, -14, 1, 0),
+		Position = UDim2.fromOffset(2, 2),
+		Size = UDim2.new(1, -2, 1, 0),
 		Font = FONT.Bold,
-		TextSize = 12,
-		TextColor3 = Theme.SubText,
+		TextSize = 15,
+		TextColor3 = Theme.Text,
 		TextXAlignment = Enum.TextXAlignment.Left,
-		Text = string.upper(tostring(name)),
+		Text = tostring(name),
 		Parent = holder,
 	})
 	self._order += 1
@@ -1178,7 +1183,7 @@ function Tab:AddToggle(o)
 		BorderSizePixel = 0,
 		Parent = row,
 	}, { Corner(0, 1) })
-	local switchGrad = Gradient(0)
+	local switchGrad = Accent(0)
 	switchGrad.Enabled = false
 	switchGrad.Parent = switch
 	local knob = New("Frame", {
@@ -1294,7 +1299,7 @@ function Tab:AddSlider(o)
 		BackgroundColor3 = Color3.new(1, 1, 1),
 		BorderSizePixel = 0,
 		Parent = track,
-	}, { Corner(0, 1), Gradient(0) })
+	}, { Corner(0, 1), Accent(0) })
 	local thumb = New("Frame", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0, 0.5),
@@ -1674,7 +1679,7 @@ function Tab:AddDropdown(o)
 				Text = opt,
 				Parent = btn,
 			})
-			local markChildren = { Gradient(45) }
+			local markChildren = { Accent(45) }
 			if multi then
 				table.insert(markChildren, Corner(5))
 				table.insert(markChildren, Stroke(Theme.Off, 1.5, 0))
