@@ -1,7 +1,8 @@
---// MouseUI v1.3 | UI library universal (gaya redz Hub / Banana Cat Hub)
+--// MouseUI v1.4 | UI library universal (gaya redz Hub / Banana Cat Hub)
 --// Muat lewat: loadstring(game:HttpGet(URL))()
---// v1.3: tema neon biru-merah dari logo, gradasi di semua elemen,
---//       ukuran panel menyesuaikan layar (mirip hub lain), logo kecil di bar judul.
+--// v1.4: tombol logo (bulat) lebih besar, panel & tepinya sedikit transparan.
+--//       Atur lewat opts atau Library.PanelTransparency / Library.IconSize.
+--// v1.3: tema neon biru-merah dari logo, gradasi, ukuran panel menyesuaikan layar.
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -11,7 +12,7 @@ local HttpService = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
 
-local Library = { Version = "1.3.0", Windows = {} }
+local Library = { Version = "1.4.0", Windows = {} }
 
 local Theme = {
 	Background = Color3.fromRGB(7, 7, 15),
@@ -33,6 +34,9 @@ Library.Theme = Theme -- ubah sebelum CreateWindow kalau mau ganti warna
 Library.DefaultIconFile = nil -- contoh: "logo.png" (file di folder workspace executor)
 Library.DefaultIconURL = "https://raw.githubusercontent.com/bismaaaa20-cloud/GUI/refs/heads/main/logo_decal_1024.jpg"
 Library.DefaultIcon = 90803590596423 -- ID asset logo pedang biru-merah (cadangan terakhir)
+
+Library.PanelTransparency = 0.12 -- 0 = padat, makin besar makin tembus pandang
+Library.IconSize = 70 -- diameter tombol logo bulat (piksel)
 
 -- Ukuran dasar panel. Skala akhir = menyesuaikan layar x pengali (Small/Medium/Large).
 local WIN_W, WIN_H = 600, 340
@@ -304,6 +308,8 @@ function Library:CreateWindow(opts)
 	gui.Parent = parent
 	self.Gui = gui
 
+	local panelT = math.clamp(opts.PanelTransparency or Library.PanelTransparency, 0, 0.7)
+
 	--// Main frame (latar gradasi gelap + garis tepi neon)
 	local main = New("Frame", {
 		Name = "Main",
@@ -311,12 +317,13 @@ function Library:CreateWindow(opts)
 		Position = UDim2.new(0.5, 0, 0.5, 0),
 		Size = UDim2.fromOffset(WIN_W, WIN_H),
 		BackgroundColor3 = Color3.new(1, 1, 1),
+		BackgroundTransparency = panelT,
 		BorderSizePixel = 0,
 		ClipsDescendants = true,
 		Parent = gui,
 	}, {
 		Corner(10),
-		GradStroke(1.5, 45),
+		GradStroke(1.5, 45, 0.25),
 		New("UIGradient", {
 			Color = ColorSequence.new(Theme.BackgroundAlt, Theme.Background),
 			Rotation = 90,
@@ -417,6 +424,7 @@ function Library:CreateWindow(opts)
 		Position = UDim2.fromOffset(0, 46),
 		Size = UDim2.new(0, 160, 1, -46),
 		BackgroundColor3 = Theme.Sidebar,
+		BackgroundTransparency = math.min(panelT + 0.1, 0.7),
 		BorderSizePixel = 0,
 		Parent = main,
 	})
@@ -491,21 +499,22 @@ function Library:CreateWindow(opts)
 	self._notifyOrder = 0
 
 	--// Floating icon (buka/tutup UI). Huruf "M" tetap ada di bawah gambar sebagai cadangan.
+	local iconSize = math.clamp(opts.IconSize or Library.IconSize, 40, 120)
 	local iconBtn = New("TextButton", {
 		Name = "ToggleIcon",
-		Size = UDim2.fromOffset(52, 52),
-		Position = UDim2.new(0.5, -26, 0, 14),
+		Size = UDim2.fromOffset(iconSize, iconSize),
+		Position = UDim2.new(0.5, -iconSize / 2, 0, 14),
 		BackgroundColor3 = Color3.fromRGB(0, 0, 0),
 		AutoButtonColor = false,
 		Text = "M",
 		Font = FONT.Bold,
-		TextSize = 22,
+		TextSize = 30,
 		TextColor3 = Theme.Text,
 		ClipsDescendants = true,
 		Parent = gui,
 	}, {
 		Corner(0, 1),
-		GradStroke(2.5, 45),
+		GradStroke(3, 45),
 	})
 	if iconAsset then
 		local img = New("ImageLabel", {
