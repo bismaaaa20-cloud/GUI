@@ -116,6 +116,17 @@ local function fail(text)
 	notify(text)
 end
 
+-- Mode uji tanpa key: script dimuat langsung dari link Raw (isi Url di Games.lua).
+-- Pakai ini hanya untuk mencoba; link Raw publik bisa dijalankan siapa pun tanpa key.
+if entry.Url then
+	notify("Memuat " .. entry.Name .. " (mode uji, tanpa key)...")
+	local ok, err = loadRemote(entry.Url, entry.Name)
+	if not ok then
+		fail(err)
+	end
+	return
+end
+
 local scriptId = tostring(entry.ScriptId or "")
 if #scriptId ~= 32 or not scriptId:match("^%x+$") then
 	fail("ScriptId " .. entry.Name .. " belum diisi di Games.lua (32 karakter dari Luarmor)")
