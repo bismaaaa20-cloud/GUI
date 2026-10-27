@@ -78,10 +78,8 @@ local function saveKey(key)
 	end)
 end
 
-if env.XevoraHubLoaded then
-	notify("Sudah berjalan di game ini")
-	return
-end
+-- Loader boleh dijalankan berkali-kali: panel lama diganti panel baru (XevoraUI menghapus window
+-- dengan nama sama), dan script game memakai RUN_ID untuk menghentikan salinan lamanya.
 
 local gameId, placeId = game.GameId, game.PlaceId
 
