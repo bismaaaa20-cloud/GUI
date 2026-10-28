@@ -1,4 +1,4 @@
---// XevoraUI v3.2 | library UI universal untuk XevoraHub
+--// XevoraUI v3.3 | library UI universal untuk XevoraHub
 --// Muat lewat: loadstring(game:HttpGet(URL))()
 --// API: CreateWindow / AddTab / AddSection / AddToggle / AddSlider / AddDropdown /
 --//      AddInput / AddButton / AddLabel / Notify / SaveConfig / LoadConfig
@@ -18,7 +18,7 @@ local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 
-local Library = { Version = "3.2.0", Windows = {} }
+local Library = { Version = "3.3.0", Windows = {} }
 
 --// ===== 1. Theme & konfigurasi =====
 
@@ -53,7 +53,8 @@ Library.PanelTransparency = 0.06
 Library.CardTransparency = 0.1
 Library.FieldTransparency = 0.18
 
--- Warna aksen statis biru -> merah (tanpa animasi pelangi, jadi ringan).
+-- Aksen kontrol (toggle, slider, indikator) = biru polos. Hanya tepi panel & logo yang punya
+-- cahaya merah-putih berputar (lewat TweenService; mati otomatis di mode hemat).
 Library.Performance = "Auto" -- "Auto" (deteksi FPS) / "High" / "Low" (HP kentang)
 
 local WIN_H = 360 -- tinggi dasar panel; lebar dihitung adaptif dari layar
@@ -105,10 +106,10 @@ local function Stroke(color, thickness, transparency)
 	})
 end
 
--- Gradasi statis biru -> merah (warna logo). fade = true membuat ujung akhir memudar.
+-- Gradasi statis satu keluarga biru. fade = true membuat ujung akhir memudar.
 local function Gradient(rotation, fade)
 	return New("UIGradient", {
-		Color = ColorSequence.new(Theme.Blue, Theme.Red),
+		Color = ColorSequence.new(Theme.Blue, Theme.Cyan),
 		Transparency = fade and NumberSequence.new({
 			NumberSequenceKeypoint.new(0, 0),
 			NumberSequenceKeypoint.new(1, 0.9),
@@ -123,6 +124,38 @@ local function GradStroke(thickness, rotation, transparency)
 		Thickness = thickness or 1,
 		Transparency = transparency or 0,
 	}, { Gradient(rotation or 0) })
+end
+
+-- Garis tepi dengan cahaya merah-putih yang berputar mengelilingi bingkai (dasar biru).
+-- Perputaran dijalankan oleh Window (lihat _regStroke) agar bisa dihentikan saat disembunyikan.
+local function OrbitStroke(thickness)
+	return New("UIStroke", {
+		Color = Color3.new(1, 1, 1),
+		Thickness = thickness or 1.5,
+		Transparency = 0,
+	}, {
+		New("UIGradient", {
+			Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, Theme.Blue),
+				ColorSequenceKeypoint.new(0.3, Theme.Blue),
+				ColorSequenceKeypoint.new(0.48, Theme.Red),
+				ColorSequenceKeypoint.new(0.58, Color3.new(1, 1, 1)),
+				ColorSequenceKeypoint.new(0.68, Theme.Red),
+				ColorSequenceKeypoint.new(0.86, Theme.Blue),
+				ColorSequenceKeypoint.new(1, Theme.Blue),
+			}),
+			Transparency = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, 0.7),
+				NumberSequenceKeypoint.new(0.3, 0.7),
+				NumberSequenceKeypoint.new(0.5, 0.05),
+				NumberSequenceKeypoint.new(0.58, 0),
+				NumberSequenceKeypoint.new(0.66, 0.05),
+				NumberSequenceKeypoint.new(0.86, 0.7),
+				NumberSequenceKeypoint.new(1, 0.7),
+			}),
+			Rotation = 45,
+		}),
+	})
 end
 
 --// ===== 3. Tween yang bisa dimatikan (mode hemat) =====
@@ -432,6 +465,7 @@ function Library:CreateWindow(opts)
 	self._mult = 1
 	self._targetScale = 1
 	self._rgbList = {}
+	self._orbits = {}
 	self._rgbOn = false
 	self._strokes = {}
 	self._shadows = {}
@@ -523,7 +557,7 @@ function Library:CreateWindow(opts)
 		Parent = root,
 	}, {
 		Corner(16),
-		self:_regStroke(GradStroke(1.2, 45, 0.4)),
+		self:_regStroke(OrbitStroke(1.6)),
 	})
 	self.Main = main
 
@@ -546,7 +580,7 @@ function Library:CreateWindow(opts)
 			Image = iconAsset,
 			ScaleType = Enum.ScaleType.Crop,
 			Parent = header,
-		}, { Corner(0, 1), self:_regStroke(GradStroke(1.5, 45)) })
+		}, { Corner(0, 1), self:_regStroke(OrbitStroke(1.8)) })
 	end
 
 	local subParts = {}
@@ -601,7 +635,7 @@ function Library:CreateWindow(opts)
 		BackgroundColor3 = Color3.new(1, 1, 1),
 		BorderSizePixel = 0,
 		Parent = main,
-	}, { self:_regGrad(Gradient(0), "slide") })
+	}, { Gradient(0, true) })
 
 	--// Sidebar (kartu)
 	local sidebar = New("Frame", {
@@ -673,7 +707,7 @@ function Library:CreateWindow(opts)
 		BackgroundColor3 = Theme.Background,
 		Image = string.format("rbxthumb://type=AvatarHeadShot&id=%d&w=150&h=150", LocalPlayer.UserId),
 		Parent = profile,
-	}, { Corner(0, 1), self:_regStroke(GradStroke(1.5, 45)) })
+	}, { Corner(0, 1), Stroke(Theme.Blue, 1.5, 0.3) })
 	New("TextLabel", {
 		BackgroundTransparency = 1,
 		Position = UDim2.fromOffset(52, 8),
@@ -744,7 +778,7 @@ function Library:CreateWindow(opts)
 		Parent = gui,
 	}, {
 		Corner(0, 1),
-		self:_regStroke(GradStroke(2.5, 45)),
+		self:_regStroke(OrbitStroke(3)),
 	})
 	if iconAsset then
 		local zoom = math.clamp(opts.IconZoom or Library.IconZoom, 1, 2)
@@ -889,6 +923,12 @@ function Window:Destroy()
 		end
 	end
 	self._rgbList = {}
+	for _, e in ipairs(self._orbits) do
+		if e.tween then
+			e.tween:Cancel()
+		end
+	end
+	self._orbits = {}
 	for _, conn in ipairs(self._conns) do
 		pcall(function()
 			conn:Disconnect()
@@ -927,10 +967,10 @@ function Window:Notify(o)
 	New("Frame", {
 		Size = UDim2.new(0, 3, 1, -16),
 		Position = UDim2.fromOffset(8, 8),
-		BackgroundColor3 = Color3.new(1, 1, 1),
+		BackgroundColor3 = Theme.Blue,
 		BorderSizePixel = 0,
 		Parent = card,
-	}, { Corner(2), Gradient(90) })
+	}, { Corner(2) })
 	local body = New("Frame", {
 		Size = UDim2.new(1, 0, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
@@ -1091,17 +1131,15 @@ function Window:AddTab(opts)
 		Parent = self._tabList,
 	}, { Corner(10) })
 
-	local indicatorGrad = Gradient(90)
-	tab._rgbEntry = self:_regControl(indicatorGrad, false)
 	tab._indicator = New("Frame", {
 		AnchorPoint = Vector2.new(0, 0.5),
 		Position = UDim2.new(0, 0, 0.5, 0),
 		Size = UDim2.fromOffset(3, 20),
-		BackgroundColor3 = Color3.new(1, 1, 1),
+		BackgroundColor3 = Theme.Blue,
 		BorderSizePixel = 0,
 		Visible = false,
 		Parent = tab.Button,
-	}, { Corner(2), indicatorGrad })
+	}, { Corner(2) })
 
 	-- Lencana ikon: hanya tampil kalau Icon diberikan; tanpa Icon tab berupa teks saja
 	tab._badge = New("Frame", {
@@ -1177,10 +1215,9 @@ function Window:AddTab(opts)
 	return tab
 end
 
---// ===== 5. Performa =====
+--// ===== 5. Cahaya berputar & performa =====
 
--- RGB dihapus (v3.2): warna aksen kini statis biru -> merah. Fungsi di bawah dipertahankan
--- (tanpa efek) supaya script lama yang memanggil Win:SetRGB tidak error.
+-- Kompatibilitas script lama (tanpa efek):
 function Window:_reg(grad, active)
 	return { grad = grad, active = active }
 end
@@ -1189,21 +1226,60 @@ function Window:_regGrad(grad)
 	return grad
 end
 
-function Window:_regStroke(stroke)
-	return stroke
-end
-
 function Window:_regControl()
 	return nil
 end
 
 function Window:_syncRGB() end
 
-function Window:_syncAll() end
+-- Cahaya merah-putih berputar di tepi panel. Diputar oleh TweenService (engine), bukan loop Lua,
+-- dan berhenti saat panel disembunyikan atau mode hemat aktif.
+function Window:_regStroke(stroke)
+	local grad = stroke:FindFirstChildOfClass("UIGradient")
+	if grad then
+		local e = { grad = grad, tween = nil }
+		table.insert(self._orbits, e)
+		task.defer(function()
+			if self.Gui then
+				self:_syncOrbit(e)
+			end
+		end)
+	end
+	return stroke
+end
 
-function Window:SetRGB() end
+function Window:_syncOrbit(e)
+	if e.tween then
+		e.tween:Cancel()
+		e.tween = nil
+	end
+	if self._rgbOn and self._visible and e.grad.Parent then
+		e.grad.Rotation = 0
+		e.tween = TweenService:Create(
+			e.grad,
+			TweenInfo.new(5, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1),
+			{ Rotation = 360 }
+		)
+		e.tween:Play()
+	else
+		e.grad.Rotation = 45
+	end
+end
 
--- mode: "Auto" (deteksi FPS) / "High" / "Low" (HP kentang: tanpa animasi, bayangan, garis tipis)
+function Window:_syncAll()
+	for _, e in ipairs(self._orbits) do
+		self:_syncOrbit(e)
+	end
+end
+
+-- Hidupkan / matikan cahaya berputar (mode hemat tetap mematikannya).
+function Window:SetRGB(on)
+	self._rgbWanted = on and true or false
+	self._rgbOn = self._rgbWanted and not self._low
+	self:_syncAll()
+end
+
+-- mode: "Auto" (deteksi FPS) / "High" / "Low" (HP kentang: tanpa cahaya berputar, animasi, bayangan, garis tipis)
 function Window:SetPerformance(mode)
 	mode = tostring(mode or "Auto")
 	self._perfMode = mode
@@ -1458,10 +1534,6 @@ function Tab:AddToggle(o)
 		BorderSizePixel = 0,
 		Parent = row,
 	}, { Corner(0, 1) })
-	local switchGrad = Gradient(0)
-	switchGrad.Enabled = false
-	switchGrad.Parent = switch
-	local rgbEntry = window:_regControl(switchGrad, false)
 	local knob = New("Frame", {
 		Position = UDim2.fromOffset(3, 3),
 		Size = UDim2.fromOffset(20, 20),
@@ -1480,12 +1552,7 @@ function Tab:AddToggle(o)
 	local value = o.Default == true
 	local function render(animate)
 		local pos = value and UDim2.fromOffset(23, 3) or UDim2.fromOffset(3, 3)
-		local col = value and Color3.new(1, 1, 1) or Theme.Off
-		switchGrad.Enabled = value
-		if rgbEntry then
-			rgbEntry.active = value
-			window:_syncRGB(rgbEntry)
-		end
+		local col = value and Theme.Blue or Theme.Off
 		if animate then
 			Tween(knob, 0.18, { Position = pos }, Enum.EasingStyle.Back)
 			Tween(switch, 0.16, { BackgroundColor3 = col })
@@ -1574,14 +1641,12 @@ function Tab:AddSlider(o)
 		BorderSizePixel = 0,
 		Parent = row,
 	}, { Corner(0, 1) })
-	local fillGrad = Gradient(0)
-	window:_regControl(fillGrad, true)
 	local fill = New("Frame", {
 		Size = UDim2.fromScale(0, 1),
-		BackgroundColor3 = Color3.new(1, 1, 1),
+		BackgroundColor3 = Theme.Blue,
 		BorderSizePixel = 0,
 		Parent = track,
-	}, { Corner(0, 1), fillGrad })
+	}, { Corner(0, 1) })
 	local thumb = New("Frame", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0, 0.5),
@@ -1966,7 +2031,7 @@ function Tab:AddDropdown(o)
 				Text = opt,
 				Parent = btn,
 			})
-			local markChildren = { Gradient(45) }
+			local markChildren = {}
 			if multi then
 				table.insert(markChildren, Corner(5))
 				table.insert(markChildren, Stroke(Theme.Off, 1.5, 0))
@@ -1977,7 +2042,7 @@ function Tab:AddDropdown(o)
 				AnchorPoint = Vector2.new(1, 0.5),
 				Position = UDim2.new(1, -12, 0.5, 0),
 				Size = multi and UDim2.fromOffset(18, 18) or UDim2.fromOffset(8, 8),
-				BackgroundColor3 = Color3.new(1, 1, 1),
+				BackgroundColor3 = Theme.Blue,
 				BackgroundTransparency = multi and 1 or 0,
 				BorderSizePixel = 0,
 				Visible = multi,
@@ -2110,10 +2175,20 @@ function Library:KeyPrompt(opts)
 		Parent = root,
 	}, {
 		Corner(16),
-		GradStroke(1.3, 45, 0.35),
+		OrbitStroke(1.6),
 	})
 
 	local rgbTween = nil
+	local borderStroke = panel:FindFirstChildOfClass("UIStroke")
+	local borderGrad = borderStroke and borderStroke:FindFirstChildOfClass("UIGradient")
+	if borderGrad and not PERF.low then
+		rgbTween = TweenService:Create(
+			borderGrad,
+			TweenInfo.new(5, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1),
+			{ Rotation = 360 }
+		)
+		rgbTween:Play()
+	end
 
 	local function close()
 		if closed then
