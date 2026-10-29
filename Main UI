@@ -1,8 +1,9 @@
---// XevoraUI v3.3 | library UI universal untuk XevoraHub
+--// XevoraUI v3.4 | library UI universal untuk XevoraHub
 --// Muat lewat: loadstring(game:HttpGet(URL))()
 --// API: CreateWindow / AddTab / AddSection / AddToggle / AddSlider / AddDropdown /
 --//      AddInput / AddButton / AddLabel / Notify / SaveConfig / LoadConfig
---//      KeyPrompt (jendela key kecil untuk Loader + Luarmor)
+--//      KeyWindow (jendela key bergaya hub: Verify Key / Get Key / About Us / Partners)
+--//      KeyPrompt (jendela key kecil, versi lama)
 --//
 --// Isi file:
 --//   1. Theme & konfigurasi        4. Window (header, sidebar, layout adaptif)
@@ -18,7 +19,7 @@ local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 
-local Library = { Version = "3.3.0", Windows = {} }
+local Library = { Version = "3.4.0", Windows = {} }
 
 --// ===== 1. Theme & konfigurasi =====
 
@@ -620,6 +621,7 @@ function Library:CreateWindow(opts)
 
 	HeaderButton(header, "close", -12, Theme.Red, function()
 		self:Destroy()
+		SafeCall(opts.OnClose)
 	end)
 	HeaderButton(header, "max", -52, Theme.Cyan, function()
 		self:SetMaximized(not self._maxed)
@@ -2386,6 +2388,187 @@ function Library:KeyPrompt(opts)
 	end)
 
 	return { Close = close, SetStatus = setStatus }
+end
+
+--// ===== 8. Jendela key bergaya hub =====
+
+-- Jendela key dengan tab: Verify Key, Get Key, About Us, (Partners).
+-- opts:
+--   Title, SubTitle     judul (SubTitle biasanya nama game)
+--   Links               daftar { Name = "...", Url = "...", Desc = "..." } untuk tab Get Key
+--   GetKeyUrl           alternatif bila hanya satu link
+--   Discord, About      isi tab About Us (Discord = link; About = teks)
+--   Partners            daftar { Name = "...", Url = "..." } (tab muncul bila tidak kosong)
+--   SavedKey, Status    isi awal kolom key dan teks status (opsional)
+--   Check(key)          -> ok:boolean, pesan:string   (boleh menunggu jaringan)
+--   OnSuccess(key)      dipanggil setelah key valid dan jendela tertutup
+--   OnClose()           dipanggil bila jendela ditutup tanpa key valid
+function Library:KeyWindow(opts)
+	opts = opts or {}
+	local keyValue = tostring(opts.SavedKey or "")
+	local busy = false
+
+	local win = Library:CreateWindow({
+		Title = tostring(opts.Title or "XevoraHub | Key System"),
+		SubTitle = opts.SubTitle,
+		OnClose = opts.OnClose,
+	})
+	if not win then
+		return nil
+	end
+
+	local function copyLink(url, label)
+		url = tostring(url or "")
+		if url == "" then
+			win:Notify({ Title = "Link kosong", Content = "Link belum diatur di Games.lua.", Duration = 4 })
+			return
+		end
+		if typeof(setclipboard) == "function" then
+			pcall(setclipboard, url)
+			win:Notify({
+				Title = tostring(label or "Link disalin"),
+				Content = "Buka di browser, selesaikan langkahnya, lalu tempel key di tab Verify Key.",
+				Duration = 5,
+			})
+		else
+			win:Notify({ Title = "Tidak bisa menyalin", Content = url, Duration = 8 })
+		end
+	end
+
+	--// Tab: Verify Key
+	local verify = win:AddTab("Verify Key")
+	verify:AddSection("Key Input")
+	local status = verify:AddLabel(
+		opts.Status and ("Status: " .. tostring(opts.Status)) or "Status: tempel key lalu tekan Check Key.",
+		40
+	)
+	local input = verify:AddInput({
+		Name = "Enter Key",
+		Placeholder = "Contoh: agKhRikC...",
+		Default = keyValue ~= "" and keyValue or nil,
+		Callback = function(v)
+			keyValue = (tostring(v):gsub("%s+", ""))
+		end,
+	})
+
+	local function runCheck()
+		if busy then
+			return
+		end
+		local key = keyValue
+		local typed = input:Get()
+		if type(typed) == "string" and typed ~= "" then
+			key = typed
+		end
+		key = (tostring(key):gsub("%s+", ""))
+		if key == "" then
+			status:Set("Status: isi key dulu.")
+			return
+		end
+		busy = true
+		status:Set("Status: memeriksa key...")
+		task.spawn(function()
+			local ran, valid, message = pcall(opts.Check, key)
+			busy = false
+			if not win.Gui then
+				return
+			end
+			if not ran then
+				status:Set("Status: terjadi kesalahan saat memeriksa key.")
+				return
+			end
+			if valid then
+				status:Set("Status: " .. tostring(message or "Key valid."))
+				win:Notify({ Title = "Key valid", Content = "Memuat script...", Duration = 3 })
+				task.wait(0.8)
+				win:Destroy()
+				SafeCall(opts.OnSuccess, key)
+			else
+				status:Set("Status: " .. tostring(message or "Key tidak valid."))
+				win:Notify({ Title = "Key ditolak", Content = tostring(message or "Key tidak valid."), Duration = 4 })
+			end
+		end)
+	end
+	verify:AddButton({
+		Name = "Check Key",
+		Desc = "Periksa key ke server",
+		Text = "Check",
+		Callback = runCheck,
+	})
+
+	--// Tab: Get Key
+	local getTab = win:AddTab("Get Key")
+	getTab:AddSection("Get Key")
+	local links = {}
+	if type(opts.Links) == "table" then
+		for _, l in ipairs(opts.Links) do
+			if type(l) == "table" and l.Url then
+				table.insert(links, l)
+			end
+		end
+	elseif type(opts.GetKeyUrl) == "string" and opts.GetKeyUrl ~= "" then
+		links = { { Name = "Get Key", Url = opts.GetKeyUrl } }
+	end
+	if #links == 0 then
+		getTab:AddLabel("Link Get Key belum diatur di Games.lua.", 40)
+	end
+	for _, l in ipairs(links) do
+		getTab:AddButton({
+			Name = tostring(l.Name or "Get Key"),
+			Desc = tostring(l.Desc or "Salin link, buka di browser"),
+			Text = "Salin Link",
+			Callback = function()
+				copyLink(l.Url, tostring(l.Name or "Link disalin"))
+			end,
+		})
+	end
+
+	--// Tab: About Us
+	local about = win:AddTab("About Us")
+	about:AddSection("About Us")
+	about:AddLabel(
+		tostring(opts.About or "XevoraHub: script hub Roblox. Ambil key di tab Get Key, lalu cek di tab Verify Key."),
+		58
+	)
+	if opts.Discord and tostring(opts.Discord) ~= "" then
+		about:AddSection("Discord Info")
+		about:AddButton({
+			Name = "Copy Discord Link",
+			Desc = tostring(opts.Discord),
+			Text = "Salin",
+			Callback = function()
+				copyLink(opts.Discord, "Link Discord disalin")
+			end,
+		})
+	end
+
+	--// Tab: Partners (hanya bila ada)
+	if type(opts.Partners) == "table" and #opts.Partners > 0 then
+		local partners = win:AddTab("Partners")
+		partners:AddSection("Partners")
+		for _, pt in ipairs(opts.Partners) do
+			if type(pt) == "table" then
+				partners:AddButton({
+					Name = tostring(pt.Name or "Partner"),
+					Desc = tostring(pt.Desc or pt.Url or ""),
+					Text = "Salin",
+					Callback = function()
+						copyLink(pt.Url, tostring(pt.Name or "Link disalin"))
+					end,
+				})
+			end
+		end
+	end
+
+	return {
+		Window = win,
+		Close = function()
+			win:Destroy()
+		end,
+		SetStatus = function(text)
+			status:Set("Status: " .. tostring(text))
+		end,
+	}
 end
 
 return Library
