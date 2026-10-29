@@ -181,22 +181,38 @@ if saved ~= "" then
 	lastMessage = msg
 end
 
--- 2) Tampilkan jendela key
+-- 2) Tampilkan jendela key (tab Verify Key / Get Key / About Us / Partners)
 local okUi, UI = loadRemote(CONFIG.UI, "XevoraUI")
-if not okUi or type(UI) ~= "table" or type(UI.KeyPrompt) ~= "function" then
-	fail(okUi and "Main UI belum versi 3.1 (KeyPrompt tidak ada)" or UI)
+if not okUi or type(UI) ~= "table" or type(UI.KeyWindow) ~= "function" then
+	fail(okUi and "Main UI belum versi 3.4 (KeyWindow tidak ada)" or UI)
 	return
 end
 
-local getKey = tostring(reg.GetKey or "")
-if getKey == "" or getKey:find("ISI_", 1, true) then
-	getKey = ""
+local function placeholder(text)
+	return type(text) ~= "string" or text == "" or text:find("ISI_", 1, true) ~= nil
 end
 
-UI:KeyPrompt({
-	Title = "XevoraHub",
+local links = {}
+local gk = reg.GetKey
+if type(gk) == "string" then
+	if not placeholder(gk) then
+		table.insert(links, { Name = "Get Key", Url = gk })
+	end
+elseif type(gk) == "table" then
+	for _, l in ipairs(gk) do
+		if type(l) == "table" and not placeholder(l.Url) then
+			table.insert(links, l)
+		end
+	end
+end
+
+UI:KeyWindow({
+	Title = "XevoraHub | Key System",
 	SubTitle = entry.Name,
-	GetKeyUrl = getKey,
+	Links = links,
+	Discord = reg.Discord,
+	About = reg.About,
+	Partners = reg.Partners,
 	SavedKey = saved,
 	Status = lastMessage,
 	Check = check,
