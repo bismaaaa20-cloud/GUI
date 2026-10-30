@@ -897,7 +897,8 @@ function Window:Toggle(state)
 	end
 	if state == self._visible then
 		return
-	end	self._visible = state
+	end
+	self._visible = state
 	self:_syncAll()
 	if not state and self._closePopup then
 		self._closePopup()
@@ -1796,6 +1797,7 @@ function Tab:AddInput(o)
 	end
 	return obj
 end
+
 function Tab:AddDropdown(o)
 	o = o or {}
 	local window = self.Window
