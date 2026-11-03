@@ -1,4 +1,4 @@
---// XevoraUI v3.7 | library UI universal untuk XevoraHub
+--// XevoraUI v3.8 | clean, responsive UI dengan pemasangan GUI transparan ke PlayerGui
 --// Muat lewat: loadstring(game:HttpGet(URL))()
 --// API: CreateWindow / AddTab / AddSection / AddToggle / AddSlider / AddDropdown /
 --//      AddInput / AddKeybind / AddButton / AddLabel / Notify / SaveConfig / LoadConfig / ListConfigs / DeleteConfig
@@ -13,7 +13,6 @@
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
-local CoreGui = game:GetService("CoreGui")
 local HttpService = game:GetService("HttpService")
 local RunService = game:GetService("RunService")
 
@@ -30,11 +29,6 @@ end
 
 local customAssetFn = FirstFunction(getcustomasset, getsynasset)
 local clipboardFn = FirstFunction(setclipboard, toclipboard)
-local hiddenGuiFn = FirstFunction(gethui, get_hidden_gui)
-local protectGuiFn = FirstFunction(protectgui)
-if not protectGuiFn and type(syn) == "table" then
-	protectGuiFn = FirstFunction(syn.protect_gui)
-end
 
 local function SetClipboard(value)
 	if not clipboardFn then return false end
@@ -42,11 +36,7 @@ local function SetClipboard(value)
 	return ok
 end
 
-local function ProtectGui(gui)
-	if protectGuiFn then pcall(protectGuiFn, gui) end
-end
-
-local Library = { Version = "3.7.0", Windows = {} }
+local Library = { Version = "3.8.0", Windows = {} }
 
 --// ===== 1. Theme & konfigurasi =====
 
@@ -293,42 +283,28 @@ local function ResolveIcon(icon, file, url)
 	return ToAsset(icon), "id"
 end
 
+-- GUI dipasang secara transparan ke PlayerGui milik LocalPlayer.
+-- Tidak memakai gethui/protectgui atau parent tersembunyi; ini bukan mekanisme anti-cheat bypass.
 local function GetGuiParent()
-	if hiddenGuiFn then
-		local ok, res = pcall(hiddenGuiFn)
-		if ok and res then return res end
-	end
-	local coreOk = pcall(function()
-		local probe = Instance.new("Folder")
-		probe.Parent = CoreGui
-		probe:Destroy()
-	end)
-	if coreOk then return CoreGui end
 	local player = LocalPlayer or Players.LocalPlayer
-	if player then
+	if not player then return nil end
+	local ok, playerGui = pcall(function()
 		return player:FindFirstChildOfClass("PlayerGui") or player:WaitForChild("PlayerGui", 10)
-	end
+	end)
+	if ok then return playerGui end
 	return nil
 end
 
 local function SetGuiParent(gui, preferred)
-	local candidates = {}
-	if preferred then table.insert(candidates, preferred) end
-	table.insert(candidates, CoreGui)
 	local player = LocalPlayer or Players.LocalPlayer
-	if player then
-		local playerGui = player:FindFirstChildOfClass("PlayerGui") or player:WaitForChild("PlayerGui", 5)
-		if playerGui then table.insert(candidates, playerGui) end
-	end
-	local tried = {}
-	for _, parent in ipairs(candidates) do
-		if parent and not tried[parent] then
-			tried[parent] = true
-			local ok = pcall(function() gui.Parent = parent end)
-			if ok then return true, parent end
-		end
-	end
-	return false, nil
+	if not player then return false, nil end
+	local ok, playerGui = pcall(function()
+		return player:FindFirstChildOfClass("PlayerGui") or player:WaitForChild("PlayerGui", 5)
+	end)
+	if not ok or not playerGui then return false, nil end
+	local parent = preferred == playerGui and preferred or playerGui
+	local mounted = pcall(function() gui.Parent = parent end)
+	return mounted, mounted and parent or nil
 end
 
 -- Menjaga panel tidak keluar layar (sebagian header harus tetap terlihat).
@@ -561,7 +537,7 @@ function Library:CreateWindow(opts)
 	end
 	local parent = GetGuiParent()
 	if not parent then
-		warn("[XevoraUI] CoreGui/PlayerGui tidak tersedia.")
+		warn("[XevoraUI] PlayerGui tidak tersedia.")
 		return nil
 	end
 	for i = #Library.Windows, 1, -1 do
@@ -578,14 +554,13 @@ function Library:CreateWindow(opts)
 		Name = guiName,
 		ResetOnSpawn = false,
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-		DisplayOrder = 999,
+		DisplayOrder = 50,
 		IgnoreGuiInset = true,
 	})
-	ProtectGui(gui)
 	local mounted = SetGuiParent(gui, parent)
 	if not mounted then
 		gui:Destroy()
-		warn("[XevoraUI] Executor tidak mengizinkan pemasangan ScreenGui ke CoreGui atau PlayerGui.")
+		warn("[XevoraUI] Executor tidak mengizinkan pemasangan ScreenGui ke PlayerGui.")
 		return nil
 	end
 	self.Gui = gui
@@ -2434,7 +2409,7 @@ function Library:KeyPrompt(opts)
 	opts = opts or {}
 	local parent = GetGuiParent()
 	if not parent then
-		warn("[XevoraUI] KeyPrompt tidak dapat menemukan CoreGui/PlayerGui.")
+		warn("[XevoraUI] KeyPrompt tidak dapat menemukan PlayerGui.")
 		return nil
 	end
 	local old = parent:FindFirstChild("XevoraKeyPrompt")
@@ -2446,10 +2421,9 @@ function Library:KeyPrompt(opts)
 		Name = "XevoraKeyPrompt",
 		ResetOnSpawn = false,
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-		DisplayOrder = 1000,
+		DisplayOrder = 51,
 		IgnoreGuiInset = true,
 	})
-	ProtectGui(gui)
 	local mounted = SetGuiParent(gui, parent)
 	if not mounted then
 		gui:Destroy()
