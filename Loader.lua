@@ -35,6 +35,7 @@ end
 local synRequest = type(syn) == "table" and syn.request or nil
 local httpTable = type(http) == "table" and http or nil
 local requestFn = FirstFunction(request, http_request, synRequest, httpTable and httpTable.request)
+local httpGetFn = FirstFunction(httpTable and httpTable.get)
 local clipboardFn = FirstFunction(setclipboard, toclipboard)
 
 local function setClipboard(value)
@@ -92,6 +93,17 @@ local function fetchBody(url)
 			end
 		else
 			firstError = firstError .. "; request: " .. tostring(response)
+		end
+	end
+	if httpGetFn then
+		local getOk, response = pcall(httpGetFn, url)
+		if not getOk and httpTable then
+			getOk, response = pcall(httpGetFn, httpTable, url)
+		end
+		if getOk and type(response) == "string" and response ~= "" then return response end
+		if getOk and type(response) == "table" then
+			local responseBody = response.Body or response.body
+			if type(responseBody) == "string" and responseBody ~= "" then return responseBody end
 		end
 	end
 	return nil, firstError
