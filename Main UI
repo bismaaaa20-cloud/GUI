@@ -1202,7 +1202,7 @@ function Window:AddTab(opts)
 	tab._order = 1
 
 	tab.Button = New("TextButton", {
-		Size = UDim2.new(1, 0, 0, 42),
+		Size = self._mobileLayout and UDim2.fromOffset(116, 38) or UDim2.new(1, 0, 0, 42),
 		BackgroundColor3 = Theme.Hover,
 		BackgroundTransparency = 1,
 		Text = "",
