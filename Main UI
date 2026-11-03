@@ -13,7 +13,6 @@
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
-local CoreGui = game:GetService("CoreGui")
 local HttpService = game:GetService("HttpService")
 local RunService = game:GetService("RunService")
 
@@ -538,7 +537,7 @@ function Library:CreateWindow(opts)
 	end
 	local parent = GetGuiParent()
 	if not parent then
-		warn("[XevoraUI] CoreGui/PlayerGui tidak tersedia.")
+		warn("[XevoraUI] PlayerGui tidak tersedia.")
 		return nil
 	end
 	for i = #Library.Windows, 1, -1 do
@@ -561,7 +560,7 @@ function Library:CreateWindow(opts)
 	local mounted = SetGuiParent(gui, parent)
 	if not mounted then
 		gui:Destroy()
-		warn("[XevoraUI] Executor tidak mengizinkan pemasangan ScreenGui ke CoreGui atau PlayerGui.")
+		warn("[XevoraUI] Executor tidak mengizinkan pemasangan ScreenGui ke PlayerGui.")
 		return nil
 	end
 	self.Gui = gui
@@ -2410,7 +2409,7 @@ function Library:KeyPrompt(opts)
 	opts = opts or {}
 	local parent = GetGuiParent()
 	if not parent then
-		warn("[XevoraUI] KeyPrompt tidak dapat menemukan CoreGui/PlayerGui.")
+		warn("[XevoraUI] KeyPrompt tidak dapat menemukan PlayerGui.")
 		return nil
 	end
 	local old = parent:FindFirstChild("XevoraKeyPrompt")
