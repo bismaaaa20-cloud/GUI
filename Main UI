@@ -1042,6 +1042,14 @@ function Window:Notify(o)
 	end)
 end
 
+local function safeConfigName(name)
+	local clean = tostring(name or "default"):gsub("[^%w_%-]", "_")
+	if clean == "" then
+		clean = "default"
+	end
+	return clean
+end
+
 function Window:SaveConfig(name)
 	if typeof(writefile) ~= "function" then
 		return false, "executor tidak mendukung writefile"
@@ -1050,7 +1058,7 @@ function Window:SaveConfig(name)
 		if typeof(isfolder) == "function" and typeof(makefolder) == "function" and not isfolder(self._folder) then
 			makefolder(self._folder)
 		end
-		writefile(self._folder .. "/" .. tostring(name or "default") .. ".json", HttpService:JSONEncode(self.Flags))
+		writefile(self._folder .. "/" .. safeConfigName(name) .. ".json", HttpService:JSONEncode(self.Flags))
 	end)
 	return ok, err
 end
@@ -1076,6 +1084,39 @@ function Window:LoadConfig(name)
 		end
 	end
 	return true
+end
+
+-- Daftar nama config yang tersimpan. Membutuhkan listfiles dari executor.
+function Window:ListConfigs()
+	if typeof(listfiles) ~= "function" then
+		return false, "executor tidak mendukung listfiles"
+	end
+	local ok, files = pcall(listfiles, self._folder)
+	if not ok or type(files) ~= "table" then
+		return false, "gagal membaca folder config"
+	end
+	local names = {}
+	for _, path in ipairs(files) do
+		local name = tostring(path):match("([^/\\\\]+)%.json$")
+		if name then
+			table.insert(names, name)
+		end
+	end
+	table.sort(names)
+	return names
+end
+
+-- Hapus satu config berdasarkan nama (tanpa ekstensi).
+function Window:DeleteConfig(name)
+	if typeof(delfile) ~= "function" then
+		return false, "executor tidak mendukung delfile"
+	end
+	local path = self._folder .. "/" .. safeConfigName(name) .. ".json"
+	if typeof(isfile) == "function" and not isfile(path) then
+		return false, "file config tidak ditemukan"
+	end
+	local ok, err = pcall(delfile, path)
+	return ok, err
 end
 
 function Window:_select(tab)
@@ -1793,6 +1834,98 @@ function Tab:AddInput(o)
 	if o.Flag then
 		window._setters[o.Flag] = function(v)
 			obj:Set(v)
+		end
+	end
+	return obj
+end
+
+-- Keybind keyboard: klik chip untuk merekam tombol, tekan tombol untuk menjalankan callback.
+function Tab:AddKeybind(o)
+	o = o or {}
+	local window = self.Window
+	local row = self:_row(52, tostring(o.Name or "") .. " " .. tostring(o.Desc or ""))
+	self:_title(row, o.Name or "Keybind", o.Desc, -14, 0.52)
+
+	local function normalizeKey(value)
+		if typeof(value) == "EnumItem" and value.EnumType == Enum.KeyCode then
+			return value
+		end
+		local name = tostring(value or "Unknown"):gsub("^Enum%.KeyCode%.", "")
+		local ok, result = pcall(function()
+			return Enum.KeyCode[name]
+		end)
+		if ok and result then
+			return result
+		end
+		return Enum.KeyCode.Unknown
+	end
+
+	local key = normalizeKey(o.Default or o.Key)
+	local listening = false
+	local chip = New("TextButton", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -12, 0.5, 0),
+		Size = UDim2.fromOffset(104, 34),
+		BackgroundColor3 = Theme.Secondary,
+		BackgroundTransparency = window._fieldT,
+		AutoButtonColor = false,
+		Font = FONT.Semi,
+		TextSize = 12,
+		TextColor3 = Theme.Cyan,
+		Text = key == Enum.KeyCode.Unknown and "None" or key.Name,
+		Parent = row,
+	}, { Corner(9), Stroke(Theme.Glow, 1, 0.55) })
+
+	local function refresh()
+		chip.Text = listening and "Press key..." or (key == Enum.KeyCode.Unknown and "None" or key.Name)
+		chip.TextColor3 = listening and Theme.Text or Theme.Cyan
+		chip.BackgroundColor3 = listening and Theme.Hover or Theme.Secondary
+	end
+
+	local obj = {}
+	function obj:Get()
+		return key
+	end
+	function obj:Set(value, silent)
+		key = normalizeKey(value)
+		listening = false
+		refresh()
+		window:_flag(o.Flag, key.Name)
+		if not silent then
+			SafeCall(o.Changed, key)
+		end
+	end
+	function obj:Capture()
+		listening = true
+		refresh()
+	end
+	function obj:Clear()
+		self:Set(Enum.KeyCode.Unknown)
+	end
+
+	chip.MouseButton1Click:Connect(function()
+		listening = not listening
+		refresh()
+	end)
+	window:_track(UserInputService.InputBegan:Connect(function(input, processed)
+		if processed or not window.Gui then
+			return
+		end
+		if listening then
+			if input.KeyCode ~= Enum.KeyCode.Unknown then
+				obj:Set(input.KeyCode)
+			end
+			return
+		end
+		if key ~= Enum.KeyCode.Unknown and input.KeyCode == key then
+			SafeCall(o.Callback, key)
+		end
+	end))
+
+	window:_flag(o.Flag, key.Name)
+	if o.Flag then
+		window._setters[o.Flag] = function(value)
+			obj:Set(value, true)
 		end
 	end
 	return obj
