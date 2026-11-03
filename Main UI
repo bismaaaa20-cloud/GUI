@@ -310,6 +310,26 @@ local function GetGuiParent()
 	return nil
 end
 
+local function SetGuiParent(gui, preferred)
+	local candidates = {}
+	if preferred then table.insert(candidates, preferred) end
+	table.insert(candidates, CoreGui)
+	local player = LocalPlayer or Players.LocalPlayer
+	if player then
+		local playerGui = player:FindFirstChildOfClass("PlayerGui") or player:WaitForChild("PlayerGui", 5)
+		if playerGui then table.insert(candidates, playerGui) end
+	end
+	local tried = {}
+	for _, parent in ipairs(candidates) do
+		if parent and not tried[parent] then
+			tried[parent] = true
+			local ok = pcall(function() gui.Parent = parent end)
+			if ok then return true, parent end
+		end
+	end
+	return false, nil
+end
+
 -- Menjaga panel tidak keluar layar (sebagian header harus tetap terlihat).
 local function ClampToScreen(frame, getScale)
 	local cam = workspace.CurrentCamera
@@ -561,7 +581,12 @@ function Library:CreateWindow(opts)
 		IgnoreGuiInset = true,
 	})
 	ProtectGui(gui)
-	gui.Parent = parent
+	local mounted = SetGuiParent(gui, parent)
+	if not mounted then
+		gui:Destroy()
+		warn("[XevoraUI] Executor tidak mengizinkan pemasangan ScreenGui ke CoreGui atau PlayerGui.")
+		return nil
+	end
 	self.Gui = gui
 
 	local function track(conn)
@@ -1004,15 +1029,11 @@ end
 function Window:Destroy()
 	if self._closePopup then pcall(self._closePopup) end
 	for _, e in ipairs(self._rgbList) do
-		if e.tween then
-			e.tween:Cancel()
-		end
+		if e.tween then pcall(function() e.tween:Cancel() end) end
 	end
 	self._rgbList = {}
 	for _, e in ipairs(self._orbits) do
-		if e.tween then
-			e.tween:Cancel()
-		end
+		if e.tween then pcall(function() e.tween:Cancel() end) end
 	end
 	self._orbits = {}
 	for _, conn in ipairs(self._conns) do
@@ -1387,18 +1408,25 @@ end
 
 function Window:_syncOrbit(e)
 	if e.tween then
-		e.tween:Cancel()
+		pcall(function() e.tween:Cancel() end)
 		e.tween = nil
 	end
-	if self._rgbOn and self._visible and e.grad.Parent then
+	if self._rgbOn and self._visible and e.grad and e.grad.Parent then
 		e.grad.Rotation = 0
-		e.tween = TweenService:Create(
-			e.grad,
-			TweenInfo.new(5, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1),
-			{ Rotation = 360 }
-		)
-		e.tween:Play()
-	else
+		local ok, tween = pcall(function()
+			return TweenService:Create(
+				e.grad,
+				TweenInfo.new(5, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1),
+				{ Rotation = 360 }
+			)
+		end)
+		if ok and tween then
+			e.tween = tween
+			pcall(function() tween:Play() end)
+		else
+			e.grad.Rotation = 45
+		end
+	elseif e.grad and e.grad.Parent then
 		e.grad.Rotation = 45
 	end
 end
@@ -1753,7 +1781,9 @@ function Tab:AddSlider(o)
 		return tonumber(string.format("%.4f", snapped)) or min
 	end
 
-	local value = snap(o.Default ~= nil and o.Default or min)
+	local defaultValue = o.Default
+	if defaultValue == nil then defaultValue = min end
+	local value = snap(defaultValue)
 	local row = self:_row(64, o.Name or "")
 	New("TextLabel", {
 		BackgroundTransparency = 1,
@@ -2387,7 +2417,12 @@ function Library:KeyPrompt(opts)
 		IgnoreGuiInset = true,
 	})
 	ProtectGui(gui)
-	gui.Parent = parent
+	local mounted = SetGuiParent(gui, parent)
+	if not mounted then
+		gui:Destroy()
+		warn("[XevoraUI] Executor tidak mengizinkan pemasangan KeyPrompt.")
+		return nil
+	end
 
 	local conns, closed, busy = {}, false, false
 	local function track(conn)
@@ -2424,12 +2459,17 @@ function Library:KeyPrompt(opts)
 	local borderStroke = panel:FindFirstChildOfClass("UIStroke")
 	local borderGrad = borderStroke and borderStroke:FindFirstChildOfClass("UIGradient")
 	if borderGrad and not PERF.low then
-		rgbTween = TweenService:Create(
-			borderGrad,
-			TweenInfo.new(5, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1),
-			{ Rotation = 360 }
-		)
-		rgbTween:Play()
+		local tweenOk, tween = pcall(function()
+			return TweenService:Create(
+				borderGrad,
+				TweenInfo.new(5, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1),
+				{ Rotation = 360 }
+			)
+		end)
+		if tweenOk and tween then
+			rgbTween = tween
+			pcall(function() rgbTween:Play() end)
+		end
 	end
 
 	local function close()
@@ -2437,9 +2477,7 @@ function Library:KeyPrompt(opts)
 			return
 		end
 		closed = true
-		if rgbTween then
-			rgbTween:Cancel()
-		end
+		if rgbTween then pcall(function() rgbTween:Cancel() end) end
 		for _, c in ipairs(conns) do
 			pcall(function()
 				c:Disconnect()
