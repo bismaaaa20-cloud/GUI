@@ -1,4 +1,4 @@
---// XevoraHub Loader | satu link untuk semua game + panel Get Key
+--// XevoraHub Loader v3.7 | HTTP fallback + executor compatibility
 --// Alur: baca GameId -> cari di Games.lua -> panel Get Key -> cek key -> jalankan script game.
 --// Tiga mode per game (diatur di Games.lua):
 --//   Url (tanpa Key)      : uji, langsung dimuat tanpa key
@@ -16,9 +16,31 @@ local CONFIG = {
 	KeyFile = "XevoraHub/key.txt",
 }
 
-local env = (getgenv and getgenv()) or _G
+local env = _G
+if typeof(getgenv) == "function" then
+	local envOk, envValue = pcall(getgenv)
+	if envOk and type(envValue) == "table" then env = envValue end
+end
 local StarterGui = game:GetService("StarterGui")
 local LocalPlayer = game:GetService("Players").LocalPlayer
+
+local function FirstFunction(...)
+	for i = 1, select("#", ...) do
+		local fn = select(i, ...)
+		if typeof(fn) == "function" then return fn end
+	end
+	return nil
+end
+
+local synRequest = type(syn) == "table" and syn.request or nil
+local httpTable = type(http) == "table" and http or nil
+local requestFn = FirstFunction(request, http_request, synRequest, httpTable and httpTable.request)
+local clipboardFn = FirstFunction(setclipboard, toclipboard)
+
+local function setClipboard(value)
+	if not clipboardFn then return false end
+	return pcall(clipboardFn, tostring(value or ""))
+end
 
 local MESSAGES = {
 	KEY_VALID = "Key valid.",
@@ -41,17 +63,55 @@ local function notify(text)
 	end)
 end
 
--- Unduh, kompilasi, jalankan. Mengembalikan (true, hasil) atau (false, pesanError).
-local function loadRemote(url, label)
+-- Unduh lewat game:HttpGet, lalu fallback ke request API umum bila tersedia.
+local function fetchBody(url)
+	local firstError
 	local ok, body = pcall(function()
 		return game:HttpGet(url)
 	end)
-	if not ok or type(body) ~= "string" or body == "" then
-		return false, label .. ": gagal diunduh"
+	if ok and type(body) == "string" and body ~= "" then
+		return body
 	end
-	local fn, err = loadstring(body)
-	if not fn then
-		return false, label .. ": kode error (" .. tostring(err) .. ")"
+	firstError = ok and "respons kosong" or tostring(body)
+
+	if requestFn then
+		local requestOk, response = pcall(requestFn, {
+			Url = url,
+			Method = "GET",
+		})
+		if requestOk then
+			if type(response) == "string" and response ~= "" then return response end
+			if type(response) == "table" then
+				local responseBody = response.Body or response.body
+				local statusCode = tonumber(response.StatusCode or response.Status or response.status_code)
+				local success = response.Success
+				if type(responseBody) == "string" and responseBody ~= ""
+					and success ~= false and (not statusCode or (statusCode >= 200 and statusCode < 300)) then
+					return responseBody
+				end
+			end
+		else
+			firstError = firstError .. "; request: " .. tostring(response)
+		end
+	end
+	return nil, firstError
+end
+
+-- Unduh, kompilasi, jalankan. Mengembalikan (true, hasil) atau (false, pesanError).
+local function loadRemote(url, label)
+	local body, downloadError = fetchBody(url)
+	if type(body) ~= "string" or body == "" then
+		return false, label .. ": gagal diunduh (" .. tostring(downloadError or "HTTP tidak tersedia") .. ")"
+	end
+	if typeof(loadstring) ~= "function" then
+		return false, label .. ": executor tidak menyediakan loadstring"
+	end
+	local compileOk, fn, compileError = pcall(loadstring, body)
+	if not compileOk then
+		return false, label .. ": gagal dikompilasi (" .. tostring(fn) .. ")"
+	end
+	if typeof(fn) ~= "function" then
+		return false, label .. ": kode tidak bisa dikompilasi (" .. tostring(compileError) .. ")"
 	end
 	local ran, result = pcall(fn)
 	if not ran then
@@ -102,10 +162,13 @@ if not entry then
 	local line = string.format('[%d] = { Name = "Nama Game", Url = "link Raw script", Key = true },', gameId)
 	print("[XevoraHub] Game belum terdaftar. GameId = " .. gameId .. ", PlaceId = " .. placeId)
 	print(line)
-	if setclipboard then
-		pcall(setclipboard, line)
+	if setClipboard(line) then
+		notify("Game ini belum didukung (GameId " .. gameId .. "). Baris pendaftaran disalin ke clipboard.")
+	else
+		print("[XevoraHub] Clipboard tidak tersedia; salin baris ini secara manual:")
+		print(line)
+		notify("Game ini belum didukung (GameId " .. gameId .. "). Baris pendaftaran ditampilkan di console.")
 	end
-	notify("Game ini belum didukung (GameId " .. gameId .. "). Baris pendaftaran disalin ke clipboard.")
 	return
 end
 
@@ -153,8 +216,13 @@ elseif entry.Url then
 			if info.Banned then
 				return false, MESSAGES.KEY_BANNED
 			end
-			if info.UserId and info.UserId ~= 0 and info.UserId ~= LocalPlayer.UserId then
-				return false, MESSAGES.KEY_OTHER_ACCOUNT
+			if info.UserId and info.UserId ~= 0 then
+				if not LocalPlayer then
+					return false, "Akun Roblox lokal belum tersedia."
+				end
+				if info.UserId ~= LocalPlayer.UserId then
+					return false, MESSAGES.KEY_OTHER_ACCOUNT
+				end
 			end
 			if info.Expires and os.date("!%Y-%m-%d") > tostring(info.Expires) then
 				return false, MESSAGES.KEY_EXPIRED
@@ -227,7 +295,7 @@ end
 -- 2) Panel "Get Key" (tab Verify Key / Get Key / About Us / Partners)
 local okUi, UI = loadRemote(CONFIG.UI, "XevoraUI")
 if not okUi or type(UI) ~= "table" or type(UI.KeyWindow) ~= "function" then
-	fail(okUi and "Main UI belum versi 3.4 (KeyWindow tidak ada)" or UI)
+	fail(okUi and "Main UI tidak menyediakan KeyWindow. Periksa versi file UI." or UI)
 	return
 end
 
