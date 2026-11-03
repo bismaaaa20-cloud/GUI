@@ -1,7 +1,7 @@
---// XevoraUI v3.4 | library UI universal untuk XevoraHub
+--// XevoraUI v3.5 | library UI universal untuk XevoraHub
 --// Muat lewat: loadstring(game:HttpGet(URL))()
 --// API: CreateWindow / AddTab / AddSection / AddToggle / AddSlider / AddDropdown /
---//      AddInput / AddButton / AddLabel / Notify / SaveConfig / LoadConfig
+--//      AddInput / AddKeybind / AddButton / AddLabel / Notify / SaveConfig / LoadConfig / ListConfigs / DeleteConfig
 --//      KeyWindow (jendela key bergaya hub: Verify Key / Get Key / About Us / Partners)
 --//      KeyPrompt (jendela key kecil, versi lama)
 --//
@@ -19,7 +19,7 @@ local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 
-local Library = { Version = "3.4.0", Windows = {} }
+local Library = { Version = "3.5.0", Windows = {} }
 
 --// ===== 1. Theme & konfigurasi =====
 
@@ -1067,7 +1067,7 @@ function Window:LoadConfig(name)
 	if typeof(readfile) ~= "function" or typeof(isfile) ~= "function" then
 		return false, "executor tidak mendukung readfile/isfile"
 	end
-	local path = self._folder .. "/" .. tostring(name or "default") .. ".json"
+	local path = self._folder .. "/" .. safeConfigName(name) .. ".json"
 	if not isfile(path) then
 		return false, "file config tidak ditemukan"
 	end
