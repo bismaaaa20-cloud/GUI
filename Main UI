@@ -1,4 +1,4 @@
---// XevoraUI v3.6 | library UI universal untuk XevoraHub
+--// XevoraUI v3.7 | library UI universal untuk XevoraHub
 --// Muat lewat: loadstring(game:HttpGet(URL))()
 --// API: CreateWindow / AddTab / AddSection / AddToggle / AddSlider / AddDropdown /
 --//      AddInput / AddKeybind / AddButton / AddLabel / Notify / SaveConfig / LoadConfig / ListConfigs / DeleteConfig
@@ -19,7 +19,34 @@ local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 
-local Library = { Version = "3.6.0", Windows = {} }
+-- API executor opsional; nama implementasinya berbeda-beda.
+local function FirstFunction(...)
+	for i = 1, select("#", ...) do
+		local fn = select(i, ...)
+		if typeof(fn) == "function" then return fn end
+	end
+	return nil
+end
+
+local customAssetFn = FirstFunction(getcustomasset, getsynasset)
+local clipboardFn = FirstFunction(setclipboard, toclipboard)
+local hiddenGuiFn = FirstFunction(gethui, get_hidden_gui)
+local protectGuiFn = FirstFunction(protectgui)
+if not protectGuiFn and type(syn) == "table" then
+	protectGuiFn = FirstFunction(syn.protect_gui)
+end
+
+local function SetClipboard(value)
+	if not clipboardFn then return false end
+	local ok = pcall(clipboardFn, tostring(value or ""))
+	return ok
+end
+
+local function ProtectGui(gui)
+	if protectGuiFn then pcall(protectGuiFn, gui) end
+end
+
+local Library = { Version = "3.7.0", Windows = {} }
 
 --// ===== 1. Theme & konfigurasi =====
 
@@ -165,19 +192,21 @@ local PERF = { low = false }
 local NoTween = { Play = function() end, Cancel = function() end, Pause = function() end }
 
 local function Tween(inst, time, props, style)
+	if typeof(inst) ~= "Instance" then return NoTween end
 	if PERF.low then
-		for k, v in pairs(props) do
-			inst[k] = v
-		end
+		for k, v in pairs(props) do pcall(function() inst[k] = v end) end
 		return NoTween
 	end
-	local tw = TweenService:Create(
-		inst,
-		TweenInfo.new(time, style or Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-		props
-	)
-	tw:Play()
-	return tw
+	local ok, tw = pcall(function()
+		return TweenService:Create(inst,
+			TweenInfo.new(time, style or Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props)
+	end)
+	if ok and tw then
+		local played = pcall(function() tw:Play() end)
+		if played then return tw end
+	end
+	for k, v in pairs(props) do pcall(function() inst[k] = v end) end
+	return NoTween
 end
 
 local function SafeCall(fn, ...)
@@ -227,52 +256,58 @@ end
 
 -- Urutan sumber ikon: file lokal -> URL -> ID asset. Mengembalikan (asset, namaSumber).
 local function ResolveIcon(icon, file, url)
-	if typeof(getcustomasset) == "function" then
-		if file and file ~= "" and typeof(isfile) == "function" then
-			local ok, res = pcall(function()
-				if isfile(file) then
-					return getcustomasset(file)
-				end
-			end)
-			if ok and res then
-				return res, "file"
+	if customAssetFn then
+		if file and file ~= "" then
+			local canLoad = true
+			if typeof(isfile) == "function" then
+				local checkOk, exists = pcall(isfile, file)
+				canLoad = checkOk and exists == true
+			end
+			if canLoad then
+				local ok, asset = pcall(customAssetFn, file)
+				if ok and asset then return asset, "file" end
 			end
 		end
 		if url and url ~= "" and typeof(writefile) == "function" then
-			local ok, res = pcall(function()
-				if typeof(isfolder) == "function" and typeof(makefolder) == "function" and not isfolder("XevoraUI") then
-					makefolder("XevoraUI")
+			local cleanUrl = tostring(url):gsub("[?#].*$", "")
+			local ext = cleanUrl:match("%.([%w]+)$") or "png"
+			local path = "XevoraUI_icon." .. ext
+			if typeof(isfolder) == "function" and typeof(makefolder) == "function" then
+				local folderOk, exists = pcall(isfolder, "XevoraUI")
+				if folderOk then
+					if not exists then pcall(makefolder, "XevoraUI") end
+					path = "XevoraUI/icon." .. ext
 				end
-				local ext = tostring(url):match("%.(%w+)$") or "png"
-				local path = "XevoraUI/icon." .. ext
-				writefile(path, game:HttpGet(url))
-				return getcustomasset(path)
-			end)
-			if ok and res then
-				return res, "url"
 			end
-			warn("[XevoraUI] gagal memuat IconURL, mencoba ID asset")
+			local httpOk, body = pcall(function() return game:HttpGet(url) end)
+			if httpOk and type(body) == "string" and body ~= "" then
+				local writeOk = pcall(writefile, path, body)
+				if writeOk then
+					local assetOk, asset = pcall(customAssetFn, path)
+					if assetOk and asset then return asset, "url" end
+				end
+			end
 		end
 	end
 	return ToAsset(icon), "id"
 end
 
 local function GetGuiParent()
-	if typeof(gethui) == "function" then
-		local ok, res = pcall(gethui)
-		if ok and res then
-			return res
-		end
+	if hiddenGuiFn then
+		local ok, res = pcall(hiddenGuiFn)
+		if ok and res then return res end
 	end
-	local ok = pcall(function()
+	local coreOk = pcall(function()
 		local probe = Instance.new("Folder")
 		probe.Parent = CoreGui
 		probe:Destroy()
 	end)
-	if ok then
-		return CoreGui
+	if coreOk then return CoreGui end
+	local player = LocalPlayer or Players.LocalPlayer
+	if player then
+		return player:FindFirstChildOfClass("PlayerGui") or player:WaitForChild("PlayerGui", 10)
 	end
-	return LocalPlayer:WaitForChild("PlayerGui")
+	return nil
 end
 
 -- Menjaga panel tidak keluar layar (sebagian header harus tetap terlihat).
@@ -498,7 +533,20 @@ function Library:CreateWindow(opts)
 		self.IconSource = iconSource
 	end
 
+	LocalPlayer = Players.LocalPlayer
+	if not LocalPlayer then
+		warn("[XevoraUI] CreateWindow harus dipanggil dari sisi client (LocalPlayer belum tersedia).")
+		return nil
+	end
 	local parent = GetGuiParent()
+	if not parent then
+		warn("[XevoraUI] CoreGui/PlayerGui tidak tersedia.")
+		return nil
+	end
+	for i = #Library.Windows, 1, -1 do
+		local previous = Library.Windows[i]
+		if previous and previous.Title == self.Title then previous:Destroy() end
+	end
 	local guiName = "XevoraUI_" .. self.Title
 	local old = parent:FindFirstChild(guiName)
 	if old then
@@ -512,9 +560,7 @@ function Library:CreateWindow(opts)
 		DisplayOrder = 999,
 		IgnoreGuiInset = true,
 	})
-	if typeof(syn) == "table" and syn.protect_gui then
-		pcall(syn.protect_gui, gui)
-	end
+	ProtectGui(gui)
 	gui.Parent = parent
 	self.Gui = gui
 
@@ -899,7 +945,7 @@ function Window:_layout()
 		self._content.Size = UDim2.new(1, -(sbW + 30), 1, -77)
 	end
 	self._mobileLayout = mobile
-	self._notifyHolder.Size = UDim2.new(0, math.max(190, math.min(270, vp.X - 24)), 1, -24)
+	self._notifyHolder.Size = UDim2.new(0, math.max(150, math.min(270, vp.X - 24)), 1, -24)
 
 	self._targetScale = math.clamp(s * self._mult, 0.45, 1.8)
 	if self._visible then
@@ -913,8 +959,8 @@ end
 -- v = "Small" / "Medium" / "Large" atau angka pengali.
 function Window:SetScale(v)
 	local mult = type(v) == "number" and v or SCALES[v]
-	if mult then
-		self._mult = mult
+	if type(mult) == "number" and mult == mult and mult > 0 and mult < math.huge then
+		self._mult = math.clamp(mult, 0.5, 1.5)
 	end
 	self:_layout()
 end
@@ -956,6 +1002,7 @@ function Window:Toggle(state)
 end
 
 function Window:Destroy()
+	if self._closePopup then pcall(self._closePopup) end
 	for _, e in ipairs(self._rgbList) do
 		if e.tween then
 			e.tween:Cancel()
@@ -1061,7 +1108,8 @@ function Window:Notify(o)
 	for _, l in ipairs(labels) do
 		Tween(l, 0.22, { TextTransparency = 0 })
 	end
-	task.delay(o.Duration or 4, function()
+	local duration = math.clamp(tonumber(o.Duration) or 4, 0.5, 30)
+	task.delay(duration, function()
 		if not (card and card.Parent) then
 			return
 		end
