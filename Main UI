@@ -1,4 +1,4 @@
---// XevoraUI v3.5 | library UI universal untuk XevoraHub
+--// XevoraUI v3.6 | library UI universal untuk XevoraHub
 --// Muat lewat: loadstring(game:HttpGet(URL))()
 --// API: CreateWindow / AddTab / AddSection / AddToggle / AddSlider / AddDropdown /
 --//      AddInput / AddKeybind / AddButton / AddLabel / Notify / SaveConfig / LoadConfig / ListConfigs / DeleteConfig
@@ -19,7 +19,7 @@ local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 
-local Library = { Version = "3.5.0", Windows = {} }
+local Library = { Version = "3.6.0", Windows = {} }
 
 --// ===== 1. Theme & konfigurasi =====
 
@@ -688,6 +688,7 @@ function Library:CreateWindow(opts)
 		New("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }),
 		Pad(10, 2, 10, 6),
 	})
+	self._tabLayout = self._tabList:FindFirstChildOfClass("UIListLayout")
 
 	-- Kartu profil di dasar sidebar
 	local profile = New("Frame", {
@@ -702,6 +703,7 @@ function Library:CreateWindow(opts)
 		Corner(10),
 		Stroke(Theme.Glow, 1, 0.7),
 	})
+	self._profile = profile
 	New("ImageLabel", {
 		AnchorPoint = Vector2.new(0, 0.5),
 		Position = UDim2.new(0, 9, 0.5, 0),
@@ -853,16 +855,51 @@ function Window:_layout()
 	local cam = workspace.CurrentCamera
 	local vp = cam and cam.ViewportSize or Vector2.new(800, 400)
 	local maxed = self._maxed
-	local fitH = vp.Y * (maxed and 0.94 or 0.84) / WIN_H
-	local fitW = vp.X * (maxed and 0.98 or 0.94) / MIN_W
+	local mobile = vp.X <= 620 and not maxed
+	local fitH = vp.Y * (maxed and 0.94 or 0.88) / WIN_H
+	local fitW = vp.X * (maxed and 0.98 or 0.96) / MIN_W
 	local s = math.min(fitH, fitW, maxed and 1.4 or 1.15)
-	local W = math.clamp(vp.X * (maxed and 0.96 or 0.66) / s, MIN_W, maxed and 960 or MAX_W)
+	local W = mobile and MIN_W or math.clamp(vp.X * (maxed and 0.96 or 0.66) / s, MIN_W, maxed and 960 or MAX_W)
 	local sbW = W < 560 and 148 or 168
 
 	self.Root.Size = UDim2.fromOffset(W, WIN_H)
-	self._sidebar.Size = UDim2.new(0, sbW, 1, -77)
-	self._content.Position = UDim2.fromOffset(sbW + 20, 67)
-	self._content.Size = UDim2.new(1, -(sbW + 30), 1, -77)
+	self._sidebar.Position = UDim2.fromOffset(10, 67)
+	if mobile then
+		-- Navigasi horizontal memberi ruang konten penuh pada layar sentuh yang sempit.
+		self._sidebar.Size = UDim2.new(1, -20, 0, 86)
+		self._searchBox.Position = UDim2.fromOffset(10, 6)
+		self._searchBox.Size = UDim2.new(1, -20, 0, 32)
+		self._searchBox.Visible = true
+		self._tabList.Position = UDim2.fromOffset(0, 42)
+		self._tabList.Size = UDim2.new(1, 0, 0, 42)
+		self._tabList.ScrollingDirection = Enum.ScrollingDirection.X
+		self._tabList.AutomaticCanvasSize = Enum.AutomaticSize.X
+		self._tabLayout.FillDirection = Enum.FillDirection.Horizontal
+		for _, tab in ipairs(self._tabs) do
+			tab.Button.Size = UDim2.fromOffset(116, 38)
+		end
+		self._profile.Visible = false
+		self._content.Position = UDim2.fromOffset(10, 159)
+		self._content.Size = UDim2.new(1, -20, 1, -169)
+	else
+		self._sidebar.Size = UDim2.new(0, sbW, 1, -77)
+		self._searchBox.Position = UDim2.fromOffset(10, 10)
+		self._searchBox.Size = UDim2.new(1, -20, 0, 36)
+		self._searchBox.Visible = true
+		self._tabList.Position = UDim2.fromOffset(0, 54)
+		self._tabList.Size = UDim2.new(1, 0, 1, -122)
+		self._tabList.ScrollingDirection = Enum.ScrollingDirection.Y
+		self._tabList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+		self._tabLayout.FillDirection = Enum.FillDirection.Vertical
+		for _, tab in ipairs(self._tabs) do
+			tab.Button.Size = UDim2.new(1, 0, 0, 42)
+		end
+		self._profile.Visible = true
+		self._content.Position = UDim2.fromOffset(sbW + 20, 67)
+		self._content.Size = UDim2.new(1, -(sbW + 30), 1, -77)
+	end
+	self._mobileLayout = mobile
+	self._notifyHolder.Size = UDim2.new(0, math.max(190, math.min(270, vp.X - 24)), 1, -24)
 
 	self._targetScale = math.clamp(s * self._mult, 0.45, 1.8)
 	if self._visible then
@@ -1165,7 +1202,7 @@ function Window:AddTab(opts)
 	tab._order = 1
 
 	tab.Button = New("TextButton", {
-		Size = UDim2.new(1, 0, 0, 42),
+		Size = self._mobileLayout and UDim2.fromOffset(116, 38) or UDim2.new(1, 0, 0, 42),
 		BackgroundColor3 = Theme.Hover,
 		BackgroundTransparency = 1,
 		Text = "",
