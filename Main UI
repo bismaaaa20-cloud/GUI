@@ -1,4 +1,4 @@
---// XevoraUI v3.6 | library UI universal untuk XevoraHub
+--// XevoraUI v3.7 | library UI universal untuk XevoraHub
 --// Muat lewat: loadstring(game:HttpGet(URL))()
 --// API: CreateWindow / AddTab / AddSection / AddToggle / AddSlider / AddDropdown /
 --//      AddInput / AddKeybind / AddButton / AddLabel / Notify / SaveConfig / LoadConfig / ListConfigs / DeleteConfig
@@ -19,7 +19,34 @@ local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 
-local Library = { Version = "3.6.0", Windows = {} }
+-- API executor opsional; nama implementasinya berbeda-beda.
+local function FirstFunction(...)
+	for i = 1, select("#", ...) do
+		local fn = select(i, ...)
+		if typeof(fn) == "function" then return fn end
+	end
+	return nil
+end
+
+local customAssetFn = FirstFunction(getcustomasset, getsynasset)
+local clipboardFn = FirstFunction(setclipboard, toclipboard)
+local hiddenGuiFn = FirstFunction(gethui, get_hidden_gui)
+local protectGuiFn = FirstFunction(protectgui)
+if not protectGuiFn and type(syn) == "table" then
+	protectGuiFn = FirstFunction(syn.protect_gui)
+end
+
+local function SetClipboard(value)
+	if not clipboardFn then return false end
+	local ok = pcall(clipboardFn, tostring(value or ""))
+	return ok
+end
+
+local function ProtectGui(gui)
+	if protectGuiFn then pcall(protectGuiFn, gui) end
+end
+
+local Library = { Version = "3.7.0", Windows = {} }
 
 --// ===== 1. Theme & konfigurasi =====
 
@@ -58,7 +85,8 @@ Library.FieldTransparency = 0.18
 -- cahaya merah-putih berputar (lewat TweenService; mati otomatis di mode hemat).
 Library.Performance = "Auto" -- "Auto" (deteksi FPS) / "High" / "Low" (HP kentang)
 
-local WIN_H = 360 -- tinggi dasar panel; lebar dihitung adaptif dari layar
+local WIN_H = 360 -- tinggi dasar desktop
+local MOBILE_H = 460 -- ruang konten ekstra untuk layout HP portrait
 local MIN_W, MAX_W = 470, 700
 local SCALES = { Small = 0.85, Medium = 1, Large = 1.2 }
 local FONT = {
@@ -165,19 +193,21 @@ local PERF = { low = false }
 local NoTween = { Play = function() end, Cancel = function() end, Pause = function() end }
 
 local function Tween(inst, time, props, style)
+	if typeof(inst) ~= "Instance" then return NoTween end
 	if PERF.low then
-		for k, v in pairs(props) do
-			inst[k] = v
-		end
+		for k, v in pairs(props) do pcall(function() inst[k] = v end) end
 		return NoTween
 	end
-	local tw = TweenService:Create(
-		inst,
-		TweenInfo.new(time, style or Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-		props
-	)
-	tw:Play()
-	return tw
+	local ok, tw = pcall(function()
+		return TweenService:Create(inst,
+			TweenInfo.new(time, style or Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props)
+	end)
+	if ok and tw then
+		local played = pcall(function() tw:Play() end)
+		if played then return tw end
+	end
+	for k, v in pairs(props) do pcall(function() inst[k] = v end) end
+	return NoTween
 end
 
 local function SafeCall(fn, ...)
@@ -227,52 +257,78 @@ end
 
 -- Urutan sumber ikon: file lokal -> URL -> ID asset. Mengembalikan (asset, namaSumber).
 local function ResolveIcon(icon, file, url)
-	if typeof(getcustomasset) == "function" then
-		if file and file ~= "" and typeof(isfile) == "function" then
-			local ok, res = pcall(function()
-				if isfile(file) then
-					return getcustomasset(file)
-				end
-			end)
-			if ok and res then
-				return res, "file"
+	if customAssetFn then
+		if file and file ~= "" then
+			local canLoad = true
+			if typeof(isfile) == "function" then
+				local checkOk, exists = pcall(isfile, file)
+				canLoad = checkOk and exists == true
+			end
+			if canLoad then
+				local ok, asset = pcall(customAssetFn, file)
+				if ok and asset then return asset, "file" end
 			end
 		end
 		if url and url ~= "" and typeof(writefile) == "function" then
-			local ok, res = pcall(function()
-				if typeof(isfolder) == "function" and typeof(makefolder) == "function" and not isfolder("XevoraUI") then
-					makefolder("XevoraUI")
+			local cleanUrl = tostring(url):gsub("[?#].*$", "")
+			local ext = cleanUrl:match("%.([%w]+)$") or "png"
+			local path = "XevoraUI_icon." .. ext
+			if typeof(isfolder) == "function" and typeof(makefolder) == "function" then
+				local folderOk, exists = pcall(isfolder, "XevoraUI")
+				if folderOk then
+					if not exists then pcall(makefolder, "XevoraUI") end
+					path = "XevoraUI/icon." .. ext
 				end
-				local ext = tostring(url):match("%.(%w+)$") or "png"
-				local path = "XevoraUI/icon." .. ext
-				writefile(path, game:HttpGet(url))
-				return getcustomasset(path)
-			end)
-			if ok and res then
-				return res, "url"
 			end
-			warn("[XevoraUI] gagal memuat IconURL, mencoba ID asset")
+			local httpOk, body = pcall(function() return game:HttpGet(url) end)
+			if httpOk and type(body) == "string" and body ~= "" then
+				local writeOk = pcall(writefile, path, body)
+				if writeOk then
+					local assetOk, asset = pcall(customAssetFn, path)
+					if assetOk and asset then return asset, "url" end
+				end
+			end
 		end
 	end
 	return ToAsset(icon), "id"
 end
 
 local function GetGuiParent()
-	if typeof(gethui) == "function" then
-		local ok, res = pcall(gethui)
-		if ok and res then
-			return res
-		end
+	if hiddenGuiFn then
+		local ok, res = pcall(hiddenGuiFn)
+		if ok and res then return res end
 	end
-	local ok = pcall(function()
+	local coreOk = pcall(function()
 		local probe = Instance.new("Folder")
 		probe.Parent = CoreGui
 		probe:Destroy()
 	end)
-	if ok then
-		return CoreGui
+	if coreOk then return CoreGui end
+	local player = LocalPlayer or Players.LocalPlayer
+	if player then
+		return player:FindFirstChildOfClass("PlayerGui") or player:WaitForChild("PlayerGui", 10)
 	end
-	return LocalPlayer:WaitForChild("PlayerGui")
+	return nil
+end
+
+local function SetGuiParent(gui, preferred)
+	local candidates = {}
+	if preferred then table.insert(candidates, preferred) end
+	table.insert(candidates, CoreGui)
+	local player = LocalPlayer or Players.LocalPlayer
+	if player then
+		local playerGui = player:FindFirstChildOfClass("PlayerGui") or player:WaitForChild("PlayerGui", 5)
+		if playerGui then table.insert(candidates, playerGui) end
+	end
+	local tried = {}
+	for _, parent in ipairs(candidates) do
+		if parent and not tried[parent] then
+			tried[parent] = true
+			local ok = pcall(function() gui.Parent = parent end)
+			if ok then return true, parent end
+		end
+	end
+	return false, nil
 end
 
 -- Menjaga panel tidak keluar layar (sebagian header harus tetap terlihat).
@@ -498,7 +554,20 @@ function Library:CreateWindow(opts)
 		self.IconSource = iconSource
 	end
 
+	LocalPlayer = Players.LocalPlayer
+	if not LocalPlayer then
+		warn("[XevoraUI] CreateWindow harus dipanggil dari sisi client (LocalPlayer belum tersedia).")
+		return nil
+	end
 	local parent = GetGuiParent()
+	if not parent then
+		warn("[XevoraUI] CoreGui/PlayerGui tidak tersedia.")
+		return nil
+	end
+	for i = #Library.Windows, 1, -1 do
+		local previous = Library.Windows[i]
+		if previous and previous.Title == self.Title then previous:Destroy() end
+	end
 	local guiName = "XevoraUI_" .. self.Title
 	local old = parent:FindFirstChild(guiName)
 	if old then
@@ -512,10 +581,13 @@ function Library:CreateWindow(opts)
 		DisplayOrder = 999,
 		IgnoreGuiInset = true,
 	})
-	if typeof(syn) == "table" and syn.protect_gui then
-		pcall(syn.protect_gui, gui)
+	ProtectGui(gui)
+	local mounted = SetGuiParent(gui, parent)
+	if not mounted then
+		gui:Destroy()
+		warn("[XevoraUI] Executor tidak mengizinkan pemasangan ScreenGui ke CoreGui atau PlayerGui.")
+		return nil
 	end
-	gui.Parent = parent
 	self.Gui = gui
 
 	local function track(conn)
@@ -817,12 +889,24 @@ function Library:CreateWindow(opts)
 			self:Toggle()
 		end
 	end))
-	local cam = workspace.CurrentCamera
-	if cam then
-		track(cam:GetPropertyChangedSignal("ViewportSize"):Connect(function()
-			self:_layout()
-		end))
+	local cameraConn
+	local function watchCamera()
+		if cameraConn then
+			pcall(function() cameraConn:Disconnect() end)
+			cameraConn = nil
+		end
+		local camera = workspace.CurrentCamera
+		if camera then
+			cameraConn = track(camera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+				self:_layout()
+			end))
+		end
 	end
+	watchCamera()
+	track(workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+		watchCamera()
+		self:_layout()
+	end))
 
 	table.insert(Library.Windows, self)
 
@@ -855,14 +939,17 @@ function Window:_layout()
 	local cam = workspace.CurrentCamera
 	local vp = cam and cam.ViewportSize or Vector2.new(800, 400)
 	local maxed = self._maxed
-	local mobile = vp.X <= 620 and not maxed
-	local fitH = vp.Y * (maxed and 0.94 or 0.88) / WIN_H
-	local fitW = vp.X * (maxed and 0.98 or 0.96) / MIN_W
-	local s = math.min(fitH, fitW, maxed and 1.4 or 1.15)
-	local W = mobile and MIN_W or math.clamp(vp.X * (maxed and 0.96 or 0.66) / s, MIN_W, maxed and 960 or MAX_W)
+	local mobile = vp.X <= 620
+	local baseHeight = mobile and MOBILE_H or WIN_H
+	local mult = math.clamp(self._mult or 1, 0.5, 1.5)
+	local fitH = vp.Y * (maxed and 0.94 or 0.88) / (baseHeight * mult)
+	local fitW = vp.X * (maxed and 0.98 or 0.96) / (MIN_W * mult)
+	local s = math.min(fitH, fitW, (maxed and 1.4 or 1.15) / mult)
+	local targetScale = math.clamp(s * mult, 0.35, 1.8)
+	local W = mobile and MIN_W or math.clamp(vp.X * (maxed and 0.96 or 0.66) / math.max(targetScale, 0.01), MIN_W, maxed and 960 or MAX_W)
 	local sbW = W < 560 and 148 or 168
 
-	self.Root.Size = UDim2.fromOffset(W, WIN_H)
+	self.Root.Size = UDim2.fromOffset(W, baseHeight)
 	self._sidebar.Position = UDim2.fromOffset(10, 67)
 	if mobile then
 		-- Navigasi horizontal memberi ruang konten penuh pada layar sentuh yang sempit.
@@ -899,9 +986,9 @@ function Window:_layout()
 		self._content.Size = UDim2.new(1, -(sbW + 30), 1, -77)
 	end
 	self._mobileLayout = mobile
-	self._notifyHolder.Size = UDim2.new(0, math.max(190, math.min(270, vp.X - 24)), 1, -24)
+	self._notifyHolder.Size = UDim2.new(0, math.max(150, math.min(270, vp.X - 24)), 1, -24)
 
-	self._targetScale = math.clamp(s * self._mult, 0.45, 1.8)
+	self._targetScale = targetScale
 	if self._visible then
 		self._scale.Scale = self._targetScale
 	end
@@ -913,8 +1000,8 @@ end
 -- v = "Small" / "Medium" / "Large" atau angka pengali.
 function Window:SetScale(v)
 	local mult = type(v) == "number" and v or SCALES[v]
-	if mult then
-		self._mult = mult
+	if type(mult) == "number" and mult == mult and mult > 0 and mult < math.huge then
+		self._mult = math.clamp(mult, 0.5, 1.5)
 	end
 	self:_layout()
 end
@@ -956,16 +1043,13 @@ function Window:Toggle(state)
 end
 
 function Window:Destroy()
+	if self._closePopup then pcall(self._closePopup) end
 	for _, e in ipairs(self._rgbList) do
-		if e.tween then
-			e.tween:Cancel()
-		end
+		if e.tween then pcall(function() e.tween:Cancel() end) end
 	end
 	self._rgbList = {}
 	for _, e in ipairs(self._orbits) do
-		if e.tween then
-			e.tween:Cancel()
-		end
+		if e.tween then pcall(function() e.tween:Cancel() end) end
 	end
 	self._orbits = {}
 	for _, conn in ipairs(self._conns) do
@@ -1061,7 +1145,10 @@ function Window:Notify(o)
 	for _, l in ipairs(labels) do
 		Tween(l, 0.22, { TextTransparency = 0 })
 	end
-	task.delay(o.Duration or 4, function()
+	local duration = tonumber(o.Duration) or 4
+	if duration ~= duration or duration == math.huge or duration == -math.huge then duration = 4 end
+	duration = math.clamp(duration, 0.5, 30)
+	task.delay(duration, function()
 		if not (card and card.Parent) then
 			return
 		end
@@ -1092,12 +1179,14 @@ function Window:SaveConfig(name)
 		return false, "executor tidak mendukung writefile"
 	end
 	local ok, err = pcall(function()
-		if typeof(isfolder) == "function" and typeof(makefolder) == "function" and not isfolder(self._folder) then
-			makefolder(self._folder)
+		if typeof(isfolder) == "function" and typeof(makefolder) == "function" then
+			local checkOk, exists = pcall(isfolder, self._folder)
+			if checkOk and not exists then makefolder(self._folder) end
 		end
 		writefile(self._folder .. "/" .. safeConfigName(name) .. ".json", HttpService:JSONEncode(self.Flags))
 	end)
-	return ok, err
+	if not ok then return false, tostring(err) end
+	return true
 end
 
 function Window:LoadConfig(name)
@@ -1105,22 +1194,24 @@ function Window:LoadConfig(name)
 		return false, "executor tidak mendukung readfile/isfile"
 	end
 	local path = self._folder .. "/" .. safeConfigName(name) .. ".json"
-	if not isfile(path) then
-		return false, "file config tidak ditemukan"
-	end
+	local checkOk, exists = pcall(isfile, path)
+	if not checkOk then return false, "gagal memeriksa file config" end
+	if not exists then return false, "file config tidak ditemukan" end
 	local ok, data = pcall(function()
-		return HttpService:JSONDecode(readfile(path))
+		local raw = readfile(path)
+		if type(raw) ~= "string" then error("data config bukan teks") end
+		return HttpService:JSONDecode(raw)
 	end)
-	if not ok or type(data) ~= "table" then
-		return false, "file config rusak"
-	end
+	if not ok or type(data) ~= "table" then return false, "file config rusak" end
+	local applied = 0
 	for flag, value in pairs(data) do
 		local setter = self._setters[flag]
 		if setter then
-			pcall(setter, value)
+			local appliedOk = pcall(setter, value)
+			if appliedOk then applied += 1 end
 		end
 	end
-	return true
+	return true, applied
 end
 
 -- Daftar nama config yang tersimpan. Membutuhkan listfiles dari executor.
@@ -1149,11 +1240,14 @@ function Window:DeleteConfig(name)
 		return false, "executor tidak mendukung delfile"
 	end
 	local path = self._folder .. "/" .. safeConfigName(name) .. ".json"
-	if typeof(isfile) == "function" and not isfile(path) then
-		return false, "file config tidak ditemukan"
+	if typeof(isfile) == "function" then
+		local checkOk, exists = pcall(isfile, path)
+		if not checkOk then return false, "gagal memeriksa file config" end
+		if not exists then return false, "file config tidak ditemukan" end
 	end
 	local ok, err = pcall(delfile, path)
-	return ok, err
+	if not ok then return false, tostring(err) end
+	return true
 end
 
 function Window:_select(tab)
@@ -1330,18 +1424,25 @@ end
 
 function Window:_syncOrbit(e)
 	if e.tween then
-		e.tween:Cancel()
+		pcall(function() e.tween:Cancel() end)
 		e.tween = nil
 	end
-	if self._rgbOn and self._visible and e.grad.Parent then
+	if self._rgbOn and self._visible and e.grad and e.grad.Parent then
 		e.grad.Rotation = 0
-		e.tween = TweenService:Create(
-			e.grad,
-			TweenInfo.new(5, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1),
-			{ Rotation = 360 }
-		)
-		e.tween:Play()
-	else
+		local ok, tween = pcall(function()
+			return TweenService:Create(
+				e.grad,
+				TweenInfo.new(5, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1),
+				{ Rotation = 360 }
+			)
+		end)
+		if ok and tween then
+			e.tween = tween
+			pcall(function() tween:Play() end)
+		else
+			e.grad.Rotation = 45
+		end
+	elseif e.grad and e.grad.Parent then
 		e.grad.Rotation = 45
 	end
 end
@@ -1675,20 +1776,31 @@ end
 function Tab:AddSlider(o)
 	o = o or {}
 	local window = self.Window
-	local min, max = o.Min or 0, o.Max or 100
-	local inc = o.Increment or 1
-	local suffix = o.Suffix or ""
-	local span = math.max(max - min, 1e-9)
+	local function finiteNumber(value, fallback)
+		local n = tonumber(value)
+		if not n or n ~= n or n == math.huge or n == -math.huge then return fallback end
+		return n
+	end
+	local min = finiteNumber(o.Min, 0)
+	local max = finiteNumber(o.Max, 100)
+	if max < min then min, max = max, min end
+	local inc = math.abs(finiteNumber(o.Increment, 1))
+	if inc < 0.0001 then inc = 1 end
+	local suffix = tostring(o.Suffix or "")
+	local span = max - min
 
 	local function snap(v)
-		v = math.floor(v / inc + 0.5) * inc
-		v = math.clamp(v, min, max)
-		return tonumber(string.format("%.4f", v))
+		v = finiteNumber(v, min)
+		if span <= 0 then return min end
+		local steps = math.floor((v - min) / inc + 0.5)
+		local snapped = math.clamp(min + steps * inc, min, max)
+		return tonumber(string.format("%.4f", snapped)) or min
 	end
 
-	local value = snap(o.Default or min)
+	local defaultValue = o.Default
+	if defaultValue == nil then defaultValue = min end
+	local value = snap(defaultValue)
 	local row = self:_row(64, o.Name or "")
-
 	New("TextLabel", {
 		BackgroundTransparency = 1,
 		Position = UDim2.fromOffset(14, 9),
@@ -1735,7 +1847,6 @@ function Tab:AddSlider(o)
 		BorderSizePixel = 0,
 		Parent = track,
 	}, { Corner(0, 1), Stroke(Theme.Blue, 2, 0) })
-	-- Area sentuh luas (tinggi 40) supaya mudah digeser di HP
 	local hit = New("TextButton", {
 		Position = UDim2.fromOffset(0, 24),
 		Size = UDim2.new(1, 0, 0, 40),
@@ -1746,28 +1857,26 @@ function Tab:AddSlider(o)
 
 	local obj = {}
 	function obj:Set(v, silent)
-		value = snap(tonumber(v) or min)
-		local rel = (value - min) / span
+		value = snap(v)
+		local rel = span > 0 and math.clamp((value - min) / span, 0, 1) or 0
 		fill.Size = UDim2.fromScale(rel, 1)
 		thumb.Position = UDim2.fromScale(rel, 0.5)
 		valLbl.Text = tostring(value) .. suffix
 		window:_flag(o.Flag, value)
-		if not silent then
-			SafeCall(o.Callback, value)
-		end
+		if not silent then SafeCall(o.Callback, value) end
 	end
 	function obj:Get()
 		return value
 	end
 
 	local dragging = false
+	local wasScrolling = true
 	local page = self.Page
 	local function fromX(x)
-		local rel = math.clamp((x - track.AbsolutePosition.X) / math.max(track.AbsoluteSize.X, 1), 0, 1)
-		local new = snap(min + (max - min) * rel)
-		if new ~= value then
-			obj:Set(new)
-		end
+		local width = math.max(track.AbsoluteSize.X, 1)
+		local rel = math.clamp((x - track.AbsolutePosition.X) / width, 0, 1)
+		local nextValue = snap(min + span * rel)
+		if nextValue ~= value then obj:Set(nextValue) end
 	end
 	local function setThumb(big)
 		Tween(thumb, 0.12, { Size = big and UDim2.fromOffset(22, 22) or UDim2.fromOffset(18, 18) })
@@ -1775,29 +1884,26 @@ function Tab:AddSlider(o)
 	hit.InputBegan:Connect(function(input)
 		if IsPress(input) then
 			dragging = true
+			wasScrolling = page.ScrollingEnabled
 			page.ScrollingEnabled = false
 			setThumb(true)
 			fromX(input.Position.X)
 		end
 	end)
 	window:_track(UserInputService.InputChanged:Connect(function(input)
-		if dragging and IsMove(input) then
-			fromX(input.Position.X)
-		end
+		if dragging and IsMove(input) then fromX(input.Position.X) end
 	end))
 	window:_track(UserInputService.InputEnded:Connect(function(input)
 		if dragging and IsPress(input) then
 			dragging = false
-			page.ScrollingEnabled = true
+			page.ScrollingEnabled = wasScrolling
 			setThumb(false)
 		end
 	end))
 
 	obj:Set(value, true)
 	if o.Flag then
-		window._setters[o.Flag] = function(v)
-			obj:Set(v)
-		end
+		window._setters[o.Flag] = function(v) obj:Set(v) end
 	end
 	task.defer(SafeCall, o.Callback, value)
 	return obj
@@ -1841,9 +1947,17 @@ function Tab:AddInput(o)
 		local text = tostring(v == nil and "" or v)
 		if o.Numeric then
 			local n = tonumber(text)
-			if n == nil then
+			if n == nil or n ~= n or n == math.huge or n == -math.huge then
 				box.Text = tostring(value)
 				return
+			end
+			if o.Min ~= nil then
+				local lower = tonumber(o.Min)
+				if lower then n = math.max(n, lower) end
+			end
+			if o.Max ~= nil then
+				local upper = tonumber(o.Max)
+				if upper then n = math.min(n, upper) end
 			end
 			value = n
 			box.Text = tostring(n)
@@ -2127,19 +2241,20 @@ function Tab:AddDropdown(o)
 		local vbPos, vbSize = valueBox.AbsolutePosition, valueBox.AbsoluteSize
 		local mainPos, mainSize = main.AbsolutePosition, main.AbsoluteSize
 		local width = vbSize.X / s
-		local wantH = math.min(#options, MAX_VISIBLE) * (OPT_H + 4) + 12
+		local wantH = #options == 0 and 46 or (math.min(#options, MAX_VISIBLE) * (OPT_H + 4) + 12)
 		local relX = (vbPos.X - mainPos.X) / s
 		local belowY = (vbPos.Y + vbSize.Y + 6 - mainPos.Y) / s
 		local aboveBottom = (vbPos.Y - 6 - mainPos.Y) / s
-		local spaceBelow = mainSize.Y / s - belowY - 8
-		local spaceAbove = aboveBottom - 64
+		local availableHeight = mainSize.Y / s
+		local spaceBelow = math.max(0, availableHeight - belowY - 8)
+		local spaceAbove = math.max(0, aboveBottom - 64)
 		local h, y
-		if spaceBelow >= wantH or spaceBelow >= spaceAbove then
-			h = math.min(wantH, math.max(spaceBelow, 70))
-			y = belowY
+		if spaceBelow >= math.min(wantH, 70) or spaceBelow >= spaceAbove then
+			y = math.clamp(belowY, 64, math.max(64, availableHeight - 48))
+			h = math.min(wantH, math.max(40, availableHeight - y - 8))
 		else
-			h = math.min(wantH, math.max(spaceAbove, 70))
-			y = aboveBottom - h
+			h = math.min(wantH, math.max(40, spaceAbove))
+			y = math.max(64, aboveBottom - h)
 		end
 
 		blocker = New("TextButton", {
@@ -2181,6 +2296,17 @@ function Tab:AddDropdown(o)
 		})
 
 		entries = {}
+		if #options == 0 then
+			New("TextLabel", {
+				Size = UDim2.new(1, 0, 0, 34),
+				BackgroundTransparency = 1,
+				Font = FONT.Regular,
+				TextSize = 12,
+				TextColor3 = Theme.SubText,
+				Text = "No options available",
+				Parent = list,
+			})
+		end
 		for i, opt in ipairs(options) do
 			local btn = New("TextButton", {
 				Size = UDim2.new(1, 0, 0, OPT_H),
@@ -2243,6 +2369,11 @@ function Tab:AddDropdown(o)
 				end
 			end)
 		end
+		for _, descendant in ipairs(popup:GetDescendants()) do
+			if descendant:IsA("GuiObject") and descendant.ZIndex < 51 then
+				descendant.ZIndex = 51
+			end
+		end
 		paintOptions()
 	end
 
@@ -2302,6 +2433,10 @@ end
 function Library:KeyPrompt(opts)
 	opts = opts or {}
 	local parent = GetGuiParent()
+	if not parent then
+		warn("[XevoraUI] KeyPrompt tidak dapat menemukan CoreGui/PlayerGui.")
+		return nil
+	end
 	local old = parent:FindFirstChild("XevoraKeyPrompt")
 	if old then
 		old:Destroy()
@@ -2314,10 +2449,13 @@ function Library:KeyPrompt(opts)
 		DisplayOrder = 1000,
 		IgnoreGuiInset = true,
 	})
-	if typeof(syn) == "table" and syn.protect_gui then
-		pcall(syn.protect_gui, gui)
+	ProtectGui(gui)
+	local mounted = SetGuiParent(gui, parent)
+	if not mounted then
+		gui:Destroy()
+		warn("[XevoraUI] Executor tidak mengizinkan pemasangan KeyPrompt.")
+		return nil
 	end
-	gui.Parent = parent
 
 	local conns, closed, busy = {}, false, false
 	local function track(conn)
@@ -2354,12 +2492,17 @@ function Library:KeyPrompt(opts)
 	local borderStroke = panel:FindFirstChildOfClass("UIStroke")
 	local borderGrad = borderStroke and borderStroke:FindFirstChildOfClass("UIGradient")
 	if borderGrad and not PERF.low then
-		rgbTween = TweenService:Create(
-			borderGrad,
-			TweenInfo.new(5, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1),
-			{ Rotation = 360 }
-		)
-		rgbTween:Play()
+		local tweenOk, tween = pcall(function()
+			return TweenService:Create(
+				borderGrad,
+				TweenInfo.new(5, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1),
+				{ Rotation = 360 }
+			)
+		end)
+		if tweenOk and tween then
+			rgbTween = tween
+			pcall(function() rgbTween:Play() end)
+		end
 	end
 
 	local function close()
@@ -2367,9 +2510,7 @@ function Library:KeyPrompt(opts)
 			return
 		end
 		closed = true
-		if rgbTween then
-			rgbTween:Cancel()
-		end
+		if rgbTween then pcall(function() rgbTween:Cancel() end) end
 		for _, c in ipairs(conns) do
 			pcall(function()
 				c:Disconnect()
@@ -2511,16 +2652,17 @@ function Library:KeyPrompt(opts)
 			setStatus("Link Get Key belum diatur di Games.lua.", "err")
 			return
 		end
-		if typeof(setclipboard) == "function" then
-			pcall(setclipboard, url)
+		if SetClipboard(url) then
 			setStatus("Link Get Key disalin. Buka di browser, selesaikan langkahnya, lalu tempel key di atas.", "ok")
 		else
-			setStatus("Executor tidak bisa menyalin. Buka manual: " .. url)
+			setStatus("Clipboard tidak tersedia. Salin link ini secara manual: " .. url)
 		end
 	end)
 
 	checkBtn.MouseButton1Click:Connect(function()
-		if busy or closed then
+		if busy or closed then return end
+		if typeof(opts.Check) ~= "function" then
+			setStatus("Pemeriksaan key belum dikonfigurasi.", "err")
 			return
 		end
 		local key = (tostring(input.Text):gsub("%s+", ""))
@@ -2593,15 +2735,14 @@ function Library:KeyWindow(opts)
 			win:Notify({ Title = "Link kosong", Content = "Link belum diatur di Games.lua.", Duration = 4 })
 			return
 		end
-		if typeof(setclipboard) == "function" then
-			pcall(setclipboard, url)
+		if SetClipboard(url) then
 			win:Notify({
 				Title = tostring(label or "Link disalin"),
 				Content = "Buka di browser, selesaikan langkahnya, lalu tempel key di tab Verify Key.",
 				Duration = 5,
 			})
 		else
-			win:Notify({ Title = "Tidak bisa menyalin", Content = url, Duration = 8 })
+			win:Notify({ Title = "Clipboard tidak tersedia", Content = "Salin link secara manual: " .. url, Duration = 8 })
 		end
 	end
 
@@ -2622,7 +2763,9 @@ function Library:KeyWindow(opts)
 	})
 
 	local function runCheck()
-		if busy then
+		if busy then return end
+		if typeof(opts.Check) ~= "function" then
+			status:Set("Status: pemeriksaan key belum dikonfigurasi.")
 			return
 		end
 		local key = keyValue
