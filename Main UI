@@ -85,7 +85,8 @@ Library.FieldTransparency = 0.18
 -- cahaya merah-putih berputar (lewat TweenService; mati otomatis di mode hemat).
 Library.Performance = "Auto" -- "Auto" (deteksi FPS) / "High" / "Low" (HP kentang)
 
-local WIN_H = 360 -- tinggi dasar panel; lebar dihitung adaptif dari layar
+local WIN_H = 360 -- tinggi dasar desktop
+local MOBILE_H = 460 -- ruang konten ekstra untuk layout HP portrait
 local MIN_W, MAX_W = 470, 700
 local SCALES = { Small = 0.85, Medium = 1, Large = 1.2 }
 local FONT = {
@@ -939,15 +940,16 @@ function Window:_layout()
 	local vp = cam and cam.ViewportSize or Vector2.new(800, 400)
 	local maxed = self._maxed
 	local mobile = vp.X <= 620
+	local baseHeight = mobile and MOBILE_H or WIN_H
 	local mult = math.clamp(self._mult or 1, 0.5, 1.5)
-	local fitH = vp.Y * (maxed and 0.94 or 0.88) / (WIN_H * mult)
+	local fitH = vp.Y * (maxed and 0.94 or 0.88) / (baseHeight * mult)
 	local fitW = vp.X * (maxed and 0.98 or 0.96) / (MIN_W * mult)
 	local s = math.min(fitH, fitW, (maxed and 1.4 or 1.15) / mult)
 	local targetScale = math.clamp(s * mult, 0.35, 1.8)
 	local W = mobile and MIN_W or math.clamp(vp.X * (maxed and 0.96 or 0.66) / math.max(targetScale, 0.01), MIN_W, maxed and 960 or MAX_W)
 	local sbW = W < 560 and 148 or 168
 
-	self.Root.Size = UDim2.fromOffset(W, WIN_H)
+	self.Root.Size = UDim2.fromOffset(W, baseHeight)
 	self._sidebar.Position = UDim2.fromOffset(10, 67)
 	if mobile then
 		-- Navigasi horizontal memberi ruang konten penuh pada layar sentuh yang sempit.
