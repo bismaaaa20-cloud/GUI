@@ -61,8 +61,8 @@ Library.Theme = Theme -- ubah sebelum CreateWindow kalau mau ganti warna
 
 -- Sumber ikon (dicoba berurutan): file lokal -> URL -> ID asset
 Library.DefaultIconFile = nil
-Library.DefaultIconURL = "https://raw.githubusercontent.com/bismaaaa20-cloud/GUI/refs/heads/main/logo_decal_1024.jpg"
-Library.DefaultIcon = 90803590596423
+Library.DefaultIconURL = "https://raw.githubusercontent.com/bismaaaa20-cloud/GUI/main/SOUL_HUB_Decal_1024.jpg"
+Library.DefaultIcon = 89529565585957
 Library.IconSize = 60 -- diameter tombol logo bulat (piksel)
 Library.IconZoom = 1.25 -- pembesaran gambar di dalam lingkaran
 
