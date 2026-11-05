@@ -2610,10 +2610,10 @@ function Library:KeyPrompt(opts)
 		Parent = panel,
 	})
 	local textX = 18
-	local asset = ResolveIcon(Library.DefaultIcon, Library.DefaultIconFile, Library.DefaultIconURL)
+	local asset, assetSource = ResolveIcon(Library.DefaultIcon, Library.DefaultIconFile, Library.DefaultIconURL)
 	if asset and asset ~= "" then
 		textX = 62
-		New("ImageLabel", {
+		local logo = New("ImageLabel", {
 			AnchorPoint = Vector2.new(0, 0.5),
 			Position = UDim2.new(0, 16, 0.5, 0),
 			Size = UDim2.fromOffset(34, 34),
@@ -2622,6 +2622,13 @@ function Library:KeyPrompt(opts)
 			ScaleType = Enum.ScaleType.Crop,
 			Parent = header,
 		}, { Corner(0, 1), GradStroke(1.5, 45) })
+		if assetSource == "id" then
+			LoadIconFromUrl(Library.DefaultIconURL, function(downloaded)
+				if logo.Parent then
+					logo.Image = downloaded
+				end
+			end)
+		end
 	end
 	New("TextLabel", {
 		BackgroundTransparency = 1,
