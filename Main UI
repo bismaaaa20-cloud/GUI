@@ -1,4 +1,4 @@
---// XevoraUI v3.8 | clean, responsive UI dengan pemasangan GUI transparan ke PlayerGui
+--// XevoraUI v3.8.1 | startup lebih ringan, logo fallback asinkron, responsif untuk mobile
 --// Muat lewat: loadstring(game:HttpGet(URL))()
 --// API: CreateWindow / AddTab / AddSection / AddToggle / AddSlider / AddDropdown /
 --//      AddInput / AddKeybind / AddButton / AddLabel / Notify / SaveConfig / LoadConfig / ListConfigs / DeleteConfig
@@ -36,7 +36,7 @@ local function SetClipboard(value)
 	return ok
 end
 
-local Library = { Version = "3.8.0", Windows = {} }
+local Library = { Version = "3.8.1", Windows = {} }
 
 --// ===== 1. Theme & konfigurasi =====
 
@@ -73,7 +73,7 @@ Library.FieldTransparency = 0.18
 
 -- Aksen kontrol (toggle, slider, indikator) = biru polos. Hanya tepi panel & logo yang punya
 -- cahaya merah-putih berputar (lewat TweenService; mati otomatis di mode hemat).
-Library.Performance = "Auto" -- "Auto" (deteksi FPS) / "High" / "Low" (HP kentang)
+Library.Performance = "Auto" -- Auto mulai ringan lalu mengaktifkan efek jika FPS stabil; High / Low
 
 local WIN_H = 360 -- tinggi dasar desktop
 local MOBILE_H = 460 -- ruang konten ekstra untuk layout HP portrait
@@ -941,16 +941,21 @@ function Library:CreateWindow(opts)
 			Parent = iconBtn,
 		})
 		if iconSource == "id" then
-			LoadIconFromUrl(opts.IconURL or Library.DefaultIconURL, function(asset)
-				if img.Parent then
-					img.Image = asset
-					self.IconSource = "url"
+			-- URL GitHub hanya dicoba jika ID Decal belum berhasil dimuat.
+			task.delay(1.5, function()
+				if img.Parent and not img.IsLoaded then
+					LoadIconFromUrl(opts.IconURL or Library.DefaultIconURL, function(asset)
+						if img.Parent then
+							img.Image = asset
+							self.IconSource = "url"
+						end
+					end)
 				end
 			end)
 		end
 		task.delay(6, function()
 			if img.Parent and not img.IsLoaded then
-				warn("[XevoraUI] gambar ikon belum termuat (sumber: " .. iconSource .. "). Kalau 'id', kemungkinan itu ID decal.")
+				warn("[XevoraUI] gambar ikon belum termuat (sumber: " .. tostring(self.IconSource or iconSource) .. ").")
 			end
 		end)
 	end
@@ -2623,9 +2628,13 @@ function Library:KeyPrompt(opts)
 			Parent = header,
 		}, { Corner(0, 1), GradStroke(1.5, 45) })
 		if assetSource == "id" then
-			LoadIconFromUrl(Library.DefaultIconURL, function(downloaded)
-				if logo.Parent then
-					logo.Image = downloaded
+			task.delay(1.5, function()
+				if logo.Parent and not logo.IsLoaded then
+					LoadIconFromUrl(Library.DefaultIconURL, function(downloaded)
+						if logo.Parent then
+							logo.Image = downloaded
+						end
+					end)
 				end
 			end)
 		end
