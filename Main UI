@@ -245,42 +245,138 @@ local function ToAsset(icon)
 	return tostring(icon)
 end
 
--- Urutan sumber ikon: file lokal -> URL -> ID asset. Mengembalikan (asset, namaSumber).
+-- Cache logo: cek file lokal secara cepat, tetapi jangan mengunduh jaringan saat window dibuat.
+local iconUrlStates = {}
+
+local function IconCachePaths(url, createFolder)
+	local cleanUrl = tostring(url or ""):gsub("[?#].*$", "")
+	local ext = (cleanUrl:match("%.([%w]+)$") or "png"):lower()
+	if ext ~= "png" and ext ~= "jpg" and ext ~= "jpeg" and ext ~= "webp" then
+		ext = "png"
+	end
+
+	local paths = {}
+	if typeof(isfolder) == "function" and typeof(makefolder) == "function" then
+		local folderOk, exists = pcall(isfolder, "XevoraUI")
+		if folderOk and not exists and createFolder then
+			folderOk, exists = pcall(makefolder, "XevoraUI")
+			exists = folderOk
+		end
+		if folderOk and exists then
+			table.insert(paths, "XevoraUI/icon." .. ext)
+		end
+	end
+	table.insert(paths, "XevoraUI_icon." .. ext)
+	return paths
+end
+
+-- Urutan sumber ikon: file lokal/cache -> ID asset. Pengunduhan URL dilakukan terpisah.
 local function ResolveIcon(icon, file, url)
 	if customAssetFn then
+		local candidates = {}
 		if file and file ~= "" then
+			table.insert(candidates, { Path = file, Source = "file" })
+		end
+		if url and url ~= "" and typeof(writefile) == "function" then
+			for _, path in ipairs(IconCachePaths(url, false)) do
+				table.insert(candidates, { Path = path, Source = "url" })
+			end
+		end
+
+		for _, item in ipairs(candidates) do
 			local canLoad = true
 			if typeof(isfile) == "function" then
-				local checkOk, exists = pcall(isfile, file)
+				local checkOk, exists = pcall(isfile, item.Path)
 				canLoad = checkOk and exists == true
 			end
 			if canLoad then
-				local ok, asset = pcall(customAssetFn, file)
-				if ok and asset then return asset, "file" end
-			end
-		end
-		if url and url ~= "" and typeof(writefile) == "function" then
-			local cleanUrl = tostring(url):gsub("[?#].*$", "")
-			local ext = cleanUrl:match("%.([%w]+)$") or "png"
-			local path = "XevoraUI_icon." .. ext
-			if typeof(isfolder) == "function" and typeof(makefolder) == "function" then
-				local folderOk, exists = pcall(isfolder, "XevoraUI")
-				if folderOk then
-					if not exists then pcall(makefolder, "XevoraUI") end
-					path = "XevoraUI/icon." .. ext
-				end
-			end
-			local httpOk, body = pcall(function() return game:HttpGet(url) end)
-			if httpOk and type(body) == "string" and body ~= "" then
-				local writeOk = pcall(writefile, path, body)
-				if writeOk then
-					local assetOk, asset = pcall(customAssetFn, path)
-					if assetOk and asset then return asset, "url" end
-				end
+				local ok, asset = pcall(customAssetFn, item.Path)
+				if ok and asset then return asset, item.Source end
 			end
 		end
 	end
 	return ToAsset(icon), "id"
+end
+
+-- Unduh logo di coroutine terpisah. UI langsung memakai ID Decal, lalu ditukar ke cache GitHub
+-- setelah file siap. Satu URL hanya diunduh sekali selama library masih hidup.
+local function LoadIconFromUrl(url, callback)
+	if type(url) ~= "string" or url == "" or not customAssetFn
+		or typeof(writefile) ~= "function" then
+		return false
+	end
+
+	local current = iconUrlStates[url]
+	if current then
+		if current.asset then
+			if typeof(callback) == "function" then
+				task.defer(callback, current.asset)
+			end
+		elseif typeof(callback) == "function" then
+			table.insert(current.callbacks, callback)
+		end
+		return true
+	end
+
+	local state = { callbacks = {} }
+	if typeof(callback) == "function" then
+		table.insert(state.callbacks, callback)
+	end
+	iconUrlStates[url] = state
+
+	task.spawn(function()
+		local asset
+		local paths = IconCachePaths(url, true)
+
+		-- Gunakan cache terlebih dahulu agar pemanggilan berikutnya tidak mengunduh lagi.
+		for _, path in ipairs(paths) do
+			local canLoad = true
+			if typeof(isfile) == "function" then
+				local checkOk, exists = pcall(isfile, path)
+				canLoad = checkOk and exists == true
+			end
+			if canLoad then
+				local ok, cached = pcall(customAssetFn, path)
+				if ok and cached then
+					asset = cached
+					break
+				end
+			end
+		end
+
+		if not asset then
+			local httpOk, body = pcall(function()
+				return game:HttpGet(url)
+			end)
+			if httpOk and type(body) == "string" and body ~= "" then
+				for _, path in ipairs(paths) do
+					local writeOk = pcall(writefile, path, body)
+					if writeOk then
+						local assetOk, downloaded = pcall(customAssetFn, path)
+						if assetOk and downloaded then
+							asset = downloaded
+							break
+						end
+					end
+				end
+			end
+		end
+
+		if asset then
+			state.asset = asset
+		else
+			iconUrlStates[url] = nil -- izinkan percobaan ulang jika unduhan gagal
+		end
+
+		for _, fn in ipairs(state.callbacks) do
+			if asset then
+				pcall(fn, asset)
+			end
+		end
+		state.callbacks = {}
+	end)
+
+	return true
 end
 
 -- GUI dipasang secara transparan ke PlayerGui milik LocalPlayer.
@@ -502,8 +598,10 @@ function Library:CreateWindow(opts)
 	self._rgbOn = false
 	self._strokes = {}
 	self._shadows = {}
-	self._low = false
 	self._perfMode = tostring(opts.Performance or Library.Performance)
+	-- Auto dan Low mulai dengan efek nonaktif; Auto menyalakannya kembali setelah FPS stabil.
+	self._low = self._perfMode == "Low" or self._perfMode == "Auto"
+	PERF.low = self._low
 	self._rgbWanted = opts.RGB ~= false and Library.RGB ~= false
 	self._folder = "XevoraUI/" .. self.Title:gsub("[^%w_%-]", "_")
 	if opts.ConfigFolder then
@@ -842,6 +940,14 @@ function Library:CreateWindow(opts)
 			ScaleType = Enum.ScaleType.Crop,
 			Parent = iconBtn,
 		})
+		if iconSource == "id" then
+			LoadIconFromUrl(opts.IconURL or Library.DefaultIconURL, function(asset)
+				if img.Parent then
+					img.Image = asset
+					self.IconSource = "url"
+				end
+			end)
+		end
 		task.delay(6, function()
 			if img.Parent and not img.IsLoaded then
 				warn("[XevoraUI] gambar ikon belum termuat (sumber: " .. iconSource .. "). Kalau 'id', kemungkinan itu ID decal.")
@@ -887,12 +993,15 @@ function Library:CreateWindow(opts)
 
 	self:SetScale(opts.Scale or "Medium")
 
-	self._rgbOn = self._rgbWanted
+	self._rgbOn = self._rgbWanted and not self._low
 	self:_syncAll()
 	if self._perfMode == "Low" then
 		self:_applyPerf(true)
 	elseif self._perfMode == "Auto" then
+		self:_applyPerf(true) -- tampilkan panel dalam mode ringan sambil mengukur FPS
 		self:_probeFPS()
+	else
+		self:_applyPerf(false)
 	end
 	return self
 end
@@ -1440,6 +1549,7 @@ function Window:SetPerformance(mode)
 	mode = tostring(mode or "Auto")
 	self._perfMode = mode
 	if mode == "Auto" then
+		self:_applyPerf(true)
 		self:_probeFPS()
 	else
 		self:_applyPerf(mode == "Low")
