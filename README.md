@@ -75,3 +75,14 @@ Script game dikelola melalui project Luarmor sesuai konfigurasi pemilik; jangan 
 - Gunakan `pcall` pada operasi yang berpotensi gagal.
 - Jangan menghindari atau menonaktifkan sistem key, HWID, atau proteksi script.
 - Jelaskan file yang diubah, langkah pengujian, dan bagian yang belum diuji.
+
+## Kebijakan startup dan performa
+
+- Logo harus tampil memakai Roblox Decal ID terlebih dahulu. Unduhan gambar dari GitHub hanya dijalankan sebagai fallback bila gambar utama belum termuat; pengunduhan dilakukan di coroutine terpisah dan disimpan ke cache executor bila API file tersedia.
+- `Performance = "Auto"` memulai XevoraUI dengan efek visual berat dimatikan. Setelah pengukuran FPS, efek hanya dinyalakan kembali jika FPS stabil (ambang saat ini 32 FPS). `Low` tetap hemat; `High` mengutamakan efek visual.
+- Jangan melakukan HTTP, operasi file, atau pekerjaan mahal secara sinkron saat membangun window bila pekerjaan tersebut bukan syarat untuk menampilkan UI.
+- Hindari pekerjaan berat pada `RunService.RenderStepped`, `PreRender`, atau `Heartbeat`. Gunakan event seperlunya, jeda yang sesuai, dan putuskan koneksi saat fitur dihentikan.
+- Pecah proses startup yang berat menjadi beberapa tahap agar tidak menumpuk pada satu frame.
+- Ukur masalah nyata di perangkat target dengan MicroProfiler/Developer Console. Jangan menjanjikan kenaikan FPS tanpa pengukuran.
+
+Referensi teknik: [Roblox Creator Hub — Improve performance](https://create.roblox.com/docs/performance-optimization/improve) dan [MicroProfiler](https://create.roblox.com/docs/performance-optimization/microprofiler).
