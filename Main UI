@@ -1,9 +1,10 @@
---// XevoraUI v3.8.1 | startup lebih ringan, logo fallback asinkron, responsif untuk mobile
+--// XevoraUI v3.9.0 | fitur publik Quasar-X terintegrasi, startup ringan, responsif mobile
 --// Muat lewat: loadstring(game:HttpGet(URL))()
 --// API: CreateWindow / AddTab / AddSection / AddToggle / AddSlider / AddDropdown /
 --//      AddInput / AddKeybind / AddButton / AddLabel / Notify / SaveConfig / LoadConfig / ListConfigs / DeleteConfig
---//      KeyWindow (jendela key bergaya hub: Verify Key / Get Key / About Us / Partners)
---//      KeyPrompt (jendela key kecil, versi lama)
+--//      KeyWindow / KeyPrompt / AddDivider / AddParagraph / AddProgressBar
+--//      CheckCompatibility / ScanScript / SendWebhook / SendDiscordWebhook
+--//      Show / Hide / IsVisible / SetToggleKey
 --//
 --// Isi file:
 --//   1. Theme & konfigurasi        4. Window (header, sidebar, layout adaptif)
@@ -27,16 +28,22 @@ local function FirstFunction(...)
 	return nil
 end
 
-local customAssetFn = FirstFunction(getcustomasset, getsynasset)
-local clipboardFn = FirstFunction(setclipboard, toclipboard)
-
+local customAssetFn, clipboardFn, requestFn
+local function RefreshExecutorAPIs()
+	customAssetFn = FirstFunction(getcustomasset, getsynasset)
+	clipboardFn = FirstFunction(setclipboard, toclipboard)
+	requestFn = FirstFunction(request, http_request, syn and syn.request, http and http.request, fluxus and fluxus.request, electron and electron.request)
+	return requestFn, clipboardFn, customAssetFn
+end
+RefreshExecutorAPIs()
 local function SetClipboard(value)
+	RefreshExecutorAPIs()
 	if not clipboardFn then return false end
 	local ok = pcall(clipboardFn, tostring(value or ""))
 	return ok
 end
 
-local Library = { Version = "3.8.1", Windows = {} }
+local Library = { Version = "3.9.0", Windows = {} }
 
 --// ===== 1. Theme & konfigurasi =====
 
@@ -969,9 +976,9 @@ function Library:CreateWindow(opts)
 	end, nil)
 
 	--// Tombol keyboard (PC) & penyesuaian saat ukuran layar / orientasi berubah
-	local toggleKey = opts.ToggleKey or Enum.KeyCode.RightControl
+	self._toggleKey = opts.ToggleKey or Enum.KeyCode.RightControl
 	track(UserInputService.InputBegan:Connect(function(input, processed)
-		if not processed and input.KeyCode == toggleKey then
+		if not processed and input.KeyCode == self._toggleKey then
 			self:Toggle()
 		end
 	end))
@@ -2982,6 +2989,482 @@ function Library:KeyWindow(opts)
 			status:Set("Status: " .. tostring(text))
 		end,
 	}
+end
+
+
+--// ===== Fitur tambahan dari Quasar-X Public v2.0.2 =====
+function Tab:AddDivider()
+        local line = New("Frame", {
+                Size = UDim2.new(1, -8, 0, 1),
+                Position = UDim2.fromOffset(4, 0),
+                BackgroundColor3 = Theme.Border,
+                BackgroundTransparency = 0.15,
+                BorderSizePixel = 0,
+                LayoutOrder = self._order,
+                Parent = self.Page,
+        })
+        self._order += 1
+        table.insert(self._items, { Frame = line, Text = "", Section = self._currentSection })
+        return line
+end
+
+function Tab:AddParagraph(o)
+        o = type(o) == "table" and o or { Content = tostring(o or "") }
+        local title = tostring(o.Title or "Information")
+        local content = tostring(o.Content or "")
+        local row = self:_row(tonumber(o.Height) or 78, title .. " " .. content)
+        local titleLabel = New("TextLabel", {
+                BackgroundTransparency = 1,
+                Position = UDim2.fromOffset(14, 8),
+                Size = UDim2.new(1, -28, 0, 20),
+                Font = FONT.Semi,
+                TextSize = 14,
+                TextColor3 = Theme.Text,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextTruncate = Enum.TextTruncate.AtEnd,
+                Text = title,
+                Parent = row,
+        })
+        local contentLabel = New("TextLabel", {
+                BackgroundTransparency = 1,
+                Position = UDim2.fromOffset(14, 31),
+                Size = UDim2.new(1, -28, 1, -38),
+                Font = FONT.Regular,
+                TextSize = 12,
+                TextColor3 = Theme.SubText,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextYAlignment = Enum.TextYAlignment.Top,
+                TextWrapped = true,
+                Text = content,
+                Parent = row,
+        })
+        local obj = {}
+        function obj:SetTitle(value)
+                titleLabel.Text = tostring(value or "")
+        end
+        function obj:SetContent(value)
+                contentLabel.Text = tostring(value or "")
+        end
+        return obj
+end
+
+function Tab:AddProgressBar(o)
+        o = o or {}
+        local window = self.Window
+        local function finite(value, fallback)
+                local n = tonumber(value)
+                if not n or n ~= n or n == math.huge or n == -math.huge then return fallback end
+                return n
+        end
+        local min = finite(o.Min, 0)
+        local max = finite(o.Max, 100)
+        if max < min then min, max = max, min end
+        local span = max - min
+        local suffix = tostring(o.Suffix or "")
+        local row = self:_row(58, tostring(o.Name or "Progress") )
+        local titleLabel = New("TextLabel", {
+                BackgroundTransparency = 1,
+                Position = UDim2.fromOffset(14, 7),
+                Size = UDim2.new(1, -120, 0, 20),
+                Font = FONT.Semi,
+                TextSize = 13,
+                TextColor3 = Theme.Text,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextTruncate = Enum.TextTruncate.AtEnd,
+                Text = tostring(o.Name or "Progress"),
+                Parent = row,
+        })
+        local valueLabel = New("TextLabel", {
+                AnchorPoint = Vector2.new(1, 0),
+                Position = UDim2.new(1, -14, 0, 7),
+                Size = UDim2.fromOffset(100, 20),
+                BackgroundTransparency = 1,
+                Font = FONT.Bold,
+                TextSize = 12,
+                TextColor3 = Theme.Cyan,
+                TextXAlignment = Enum.TextXAlignment.Right,
+                Text = "",
+                Parent = row,
+        })
+        local bar = New("Frame", {
+                Position = UDim2.fromOffset(14, 35),
+                Size = UDim2.new(1, -28, 0, 8),
+                BackgroundColor3 = Theme.Secondary,
+                BorderSizePixel = 0,
+                Parent = row,
+        }, { Corner(0, 1) })
+        local fill = New("Frame", {
+                Size = UDim2.fromScale(0, 1),
+                BackgroundColor3 = Theme.Blue,
+                BorderSizePixel = 0,
+                Parent = bar,
+        }, { Corner(0, 1) })
+        local value = min
+        local obj = {}
+        function obj:Set(nextValue, silent)
+                local n = math.clamp(finite(nextValue, min), min, max)
+                value = n
+                local ratio = span > 0 and math.clamp((n - min) / span, 0, 1) or 0
+                Tween(fill, 0.16, { Size = UDim2.fromScale(ratio, 1) })
+                valueLabel.Text = tostring(n) .. suffix
+                window:_flag(o.Flag, value)
+                if not silent then SafeCall(o.Callback, value) end
+        end
+        function obj:Get()
+                return value
+        end
+        obj:Set(o.Default ~= nil and o.Default or min, true)
+        if o.Flag then
+                window:_registerFlag(o.Flag, function(v) obj:Set(v, true) end)
+        end
+        return obj
+end
+
+function Tab:AddLabel(text, height)
+        local row = self:_row(height or 38, text)
+        local lbl = New("TextLabel", {
+                BackgroundTransparency = 1,
+                Position = UDim2.fromOffset(14, 0),
+                Size = UDim2.new(1, -28, 1, 0),
+                Font = FONT.Regular,
+                TextSize = 12,
+                TextWrapped = true,
+                TextColor3 = Theme.SubText,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Text = tostring(text),
+                Parent = row,
+        })
+        local obj = {}
+        function obj:Set(t)
+                lbl.Text = tostring(t)
+        end
+        return obj
+end
+
+function Tab:AddButton(o)
+        o = o or {}
+        local hasDesc = o.Desc ~= nil and o.Desc ~= ""
+        local row = self:_row(hasDesc and 58 or 50, tostring(o.Name or "") .. " " .. tostring(o.Desc or ""))
+        self:_title(row, o.Name or "Button", hasDesc and o.Desc or nil, -132)
+
+        -- Chip aksi di kanan: garis gradasi biru -> merah, terisi gradasi saat ditekan
+        local chip = New("Frame", {
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, -12, 0.5, 0),
+                Size = UDim2.fromOffset(100, 34),
+                BackgroundTransparency = 1,
+                Parent = row,
+        }, {
+                Corner(10),
+                GradStroke(1.5, 0, 0.1),
+        })
+        local fill = New("Frame", {
+                Size = UDim2.fromScale(1, 1),
+                BackgroundColor3 = Color3.new(1, 1, 1),
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+                Parent = chip,
+        }, { Corner(10), Gradient(0) })
+        New("TextLabel", {
+                Size = UDim2.fromScale(1, 1),
+                BackgroundTransparency = 1,
+                Font = FONT.Semi,
+                TextSize = 13,
+                TextColor3 = Theme.Text,
+                Text = tostring(o.Text or "Jalankan"),
+                Parent = chip,
+        })
+
+        local btn = New("TextButton", {
+                Size = UDim2.fromScale(1, 1),
+                BackgroundTransparency = 1,
+                Text = "",
+                Parent = row,
+        })
+        Pressable(btn, row, Theme.Card, Theme.Hover)
+        btn.MouseButton1Down:Connect(function()
+                Tween(fill, 0.08, { BackgroundTransparency = 0.25 })
+        end)
+        local function release()
+                Tween(fill, 0.2, { BackgroundTransparency = 1 })
+        end
+        btn.MouseButton1Up:Connect(release)
+        btn.MouseLeave:Connect(release)
+        btn.MouseButton1Click:Connect(function()
+                SafeCall(o.Callback)
+        end)
+        local obj = {}
+        function obj:Fire()
+                SafeCall(o.Callback)
+        end
+        return obj
+end
+
+function Window:Show()
+        self:Toggle(true)
+end
+
+function Window:Hide()
+        self:Toggle(false)
+end
+
+function Window:IsVisible()
+        return self._visible == true
+end
+
+function Window:SetToggleKey(key)
+        if typeof(key) ~= "EnumItem" or key.EnumType ~= Enum.KeyCode then
+                return false
+        end
+        self._toggleKey = key
+        return true
+end
+
+function Library:CheckCompatibility()
+        RefreshExecutorAPIs()
+        local function available(fn)
+                return typeof(fn) == "function"
+        end
+        local executorName = "Tidak diketahui"
+        local identifyFn = FirstFunction(identifyexecutor, getexecutorname)
+        if identifyFn then
+                local ok, name = pcall(identifyFn)
+                if ok and name then executorName = tostring(name) end
+        end
+
+        local capabilities = {
+                UI = typeof(Instance) == "table" and available(Instance.new) and game ~= nil,
+                TouchInput = UserInputService ~= nil and UserInputService.TouchEnabled == true,
+                KeyboardInput = UserInputService ~= nil and UserInputService.KeyboardEnabled == true,
+                MouseInput = UserInputService ~= nil and UserInputService.MouseEnabled == true,
+                HttpRequest = available(requestFn),
+                Clipboard = available(clipboardFn),
+                CustomAsset = available(customAssetFn),
+                ReadFile = available(readfile),
+                WriteFile = available(writefile),
+                IsFile = available(isfile),
+                MakeFolder = available(makefolder),
+                IsFolder = available(isfolder),
+                DeleteFile = available(delfile),
+                ListFiles = available(listfiles),
+                IdentifyExecutor = identifyFn ~= nil,
+                PlayerGui = LocalPlayer ~= nil and LocalPlayer:FindFirstChildOfClass("PlayerGui") ~= nil,
+        }
+
+        local supported, unsupported = {}, {}
+        for name, ok in pairs(capabilities) do
+                if ok then
+                        table.insert(supported, name)
+                else
+                        table.insert(unsupported, name)
+                end
+        end
+        table.sort(supported)
+        table.sort(unsupported)
+
+        return {
+                Executor = executorName,
+                Version = self.Version,
+                Capabilities = capabilities,
+                Supported = supported,
+                Unsupported = unsupported,
+                Note = "Pemeriksaan pasif. Keberadaan API tidak menjamin API berfungsi atau kompatibel penuh.",
+        }
+end
+
+--// ===== Anti-Scam scanner (heuristic; does not execute or block code) =====
+local AntiScamRules = {
+        {
+                Pattern = "roblosecurity",
+                Label = "Referensi cookie .ROBLOSECURITY",
+                Severity = "high",
+                Points = 5,
+        },
+        {
+                Pattern = "steal robux",
+                Label = "Klaim atau instruksi pencurian Robux",
+                Severity = "high",
+                Points = 5,
+        },
+        {
+                Pattern = "robux generator",
+                Label = "Klaim Robux generator",
+                Severity = "review",
+                Points = 3,
+        },
+        {
+                Pattern = "free robux",
+                Label = "Klaim gratis Robux yang perlu diverifikasi",
+                Severity = "review",
+                Points = 2,
+        },
+        {
+                Pattern = "session token",
+                Label = "Referensi session token",
+                Severity = "high",
+                Points = 5,
+        },
+        {
+                Pattern = "authentication token",
+                Label = "Referensi authentication token",
+                Severity = "high",
+                Points = 5,
+        },
+        {
+                Pattern = "account password",
+                Label = "Permintaan atau pengambilan password akun",
+                Severity = "high",
+                Points = 5,
+        },
+        {
+                Pattern = "discord.com/api/webhooks",
+                Label = "Endpoint Discord webhook (periksa data yang dikirim)",
+                Severity = "review",
+                Points = 2,
+        },
+}
+
+function Library:ScanScript(source)
+        if type(source) ~= "string" then
+                return false, "Source script harus berupa string."
+        end
+        if #source > 1000000 then
+                return false, "Source terlalu besar untuk diperiksa (maksimal 1 MB)."
+        end
+
+        local normalized = source:lower()
+        local findings = {}
+        local score = 0
+        local seen = {}
+
+        for _, rule in ipairs(AntiScamRules) do
+                if normalized:find(rule.Pattern, 1, true) and not seen[rule.Pattern] then
+                        seen[rule.Pattern] = true
+                        score = score + rule.Points
+                        table.insert(findings, {
+                                Indicator = rule.Label,
+                                Severity = rule.Severity,
+                        })
+                end
+        end
+
+        -- Pola loader umum tidak otomatis dianggap scam; cukup minta pemeriksaan.
+        if normalized:find("httpget", 1, true)
+                and normalized:find("loadstring", 1, true) then
+                score = score + 1
+                table.insert(findings, {
+                        Indicator = "Loader mengambil lalu menjalankan kode dari internet",
+                        Severity = "review",
+                })
+        end
+
+        local risk = "low"
+        local recommendation = "Tidak ada indikator yang cocok. Ini bukan jaminan script aman."
+        if score >= 5 then
+                risk = "high"
+                recommendation = "Hentikan sementara dan periksa source serta tujuan request sebelum menjalankan."
+        elseif score > 0 then
+                risk = "review"
+                recommendation = "Periksa indikator secara manual. Jangan langsung menyimpulkan script ini scam."
+        end
+
+        return true, {
+                Risk = risk,
+                Score = score,
+                Findings = findings,
+                Recommendation = recommendation,
+                AutoBlocked = false,
+                Disclaimer = "Pemeriksaan berbasis pola sederhana; bisa salah mendeteksi dan tidak dapat menjamin keamanan.",
+        }
+end
+
+
+
+--// ===== Webhook support (executor HTTP request API) =====
+function Library:IsWebhookSupported()
+        RefreshExecutorAPIs()
+        return typeof(requestFn) == "function"
+end
+
+local function ValidWebhookUrl(url)
+        return type(url) == "string"
+                and #url <= 2048
+                and url:match("^https://") ~= nil
+end
+
+function Library:SendWebhook(url, payload)
+        if not ValidWebhookUrl(url) then
+                return false, "URL webhook harus berupa HTTPS yang valid."
+        end
+        if type(payload) ~= "table" then
+                return false, "Payload webhook harus berupa table."
+        end
+        RefreshExecutorAPIs()
+        if not requestFn then
+                return false, "Executor tidak menyediakan HTTP request API."
+        end
+
+        local encodedOk, body = pcall(function()
+                return HttpService:JSONEncode(payload)
+        end)
+        if not encodedOk then
+                return false, "Payload gagal diubah menjadi JSON: " .. tostring(body)
+        end
+
+        local requestOk, response = pcall(requestFn, {
+                Url = url,
+                Method = "POST",
+                Headers = {
+                        ["Content-Type"] = "application/json",
+                        ["Accept"] = "application/json",
+                },
+                Body = body,
+        })
+        if not requestOk then
+                return false, "Request webhook gagal: " .. tostring(response)
+        end
+        if type(response) == "table" then
+                local statusCode = tonumber(response.StatusCode or response.Status)
+                if response.Success == false or (statusCode and (statusCode < 200 or statusCode >= 300)) then
+                        return false, "Webhook menolak request (HTTP " .. tostring(statusCode or "unknown") .. ").", response
+                end
+        end
+        return true, response
+end
+
+-- Helper Discord: kirim content dan/atau satu embed.
+function Library:SendDiscordWebhook(url, options)
+        options = type(options) == "table" and options or {}
+        local payload = {}
+        if options.Content ~= nil then payload.content = tostring(options.Content) end
+        if options.Username ~= nil then payload.username = tostring(options.Username) end
+        if options.AvatarURL ~= nil then payload.avatar_url = tostring(options.AvatarURL) end
+
+        if options.Embed then
+                local embed = options.Embed
+                local fields = {}
+                for _, field in ipairs(embed.Fields or {}) do
+                        if type(field) == "table" then
+                                table.insert(fields, {
+                                        name = tostring(field.Name or "Info"),
+                                        value = tostring(field.Value or "-"),
+                                        inline = field.Inline == true,
+                                })
+                        end
+                end
+                local discordEmbed = {
+                        title = embed.Title and tostring(embed.Title) or nil,
+                        description = embed.Description and tostring(embed.Description) or nil,
+                        color = math.clamp(math.floor(tonumber(embed.Color) or 5793266), 0, 16777215),
+                        fields = #fields > 0 and fields or nil,
+                        footer = embed.Footer and { text = tostring(embed.Footer) } or nil,
+                }
+                payload.embeds = { discordEmbed }
+        end
+        if payload.content == nil and payload.embeds == nil then
+                return false, "Isi Discord webhook kosong."
+        end
+        return self:SendWebhook(url, payload)
 end
 
 return Library
