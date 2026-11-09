@@ -85,6 +85,7 @@ Library.Performance = "Auto" -- Auto mulai ringan lalu mengaktifkan efek jika FP
 local WIN_H = 360 -- tinggi dasar desktop
 local MOBILE_H = 460 -- ruang konten ekstra untuk layout HP portrait
 local MIN_W, MAX_W = 470, 700
+local TAB_REST_T = 0.72 -- transparansi baris tab saat tidak aktif
 local SCALES = { Small = 0.85, Medium = 1, Large = 1.2 }
 local FONT = {
 	Regular = Enum.Font.Gotham,
@@ -122,6 +123,38 @@ local function Pad(l, t, r, b)
 		PaddingRight = UDim.new(0, r),
 		PaddingBottom = UDim.new(0, b),
 	})
+end
+ 
+local function RichEscape(text)
+	return (tostring(text):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"))
+end
+
+local function HexOf(c)
+	return string.format("#%02X%02X%02X",
+		math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5))
+end
+
+-- Chevron vektor "v"; diputar lewat Rotation holder-nya.
+local function Chevron(parent, position, color)
+	local holder = New("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = position,
+		Size = UDim2.fromOffset(14, 14),
+		BackgroundTransparency = 1,
+		Parent = parent,
+	})
+	for _, side in ipairs({ -1, 1 }) do
+		New("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.new(0.5, side * 2.8, 0.5, -1),
+			Size = UDim2.fromOffset(8, 2),
+			Rotation = side == -1 and 45 or -45,
+			BackgroundColor3 = color or Theme.SubText,
+			BorderSizePixel = 0,
+			Parent = holder,
+		}, { Corner(0, 1) })
+	end
+	return holder
 end
 
 local function Stroke(color, thickness, transparency)
@@ -736,40 +769,30 @@ function Library:CreateWindow(opts)
 		}, { Corner(0, 1), self:_regStroke(OrbitStroke(1.8)) })
 	end
 
-	local subParts = {}
-	if opts.SubTitle then
-		table.insert(subParts, tostring(opts.SubTitle))
+	local titleText = RichEscape(self.Title)
+	local subTitle = opts.SubTitle ~= nil and tostring(opts.SubTitle) or ""
+	local author = opts.Author ~= nil and tostring(opts.Author) or ""
+	if subTitle ~= "" then
+		titleText = titleText .. string.format('<font color="%s">  :  %s</font>',
+			HexOf(Theme.SubText), RichEscape(subTitle))
 	end
-	if opts.Author then
-		table.insert(subParts, "by " .. tostring(opts.Author))
+	if author ~= "" then
+		titleText = titleText .. string.format('  <font size="11" color="%s">by %s</font>',
+			HexOf(Theme.SubText), RichEscape(author))
 	end
-	local subText = table.concat(subParts, "  |  ")
 	New("TextLabel", {
 		BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(textX, subText ~= "" and 10 or 0),
-		Size = UDim2.new(1, -(textX + 136), 0, subText ~= "" and 21 or 56),
+		Position = UDim2.fromOffset(textX, 0),
+		Size = UDim2.new(1, -(textX + 136), 1, 0),
 		Font = FONT.Bold,
 		TextSize = 17,
 		TextColor3 = Theme.Text,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd,
-		Text = self.Title,
+		RichText = true,
+		Text = titleText,
 		Parent = header,
 	})
-	if subText ~= "" then
-		New("TextLabel", {
-			BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(textX, 31),
-			Size = UDim2.new(1, -(textX + 136), 0, 16),
-			Font = FONT.Regular,
-			TextSize = 12,
-			TextColor3 = Theme.SubText,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			TextTruncate = Enum.TextTruncate.AtEnd,
-			Text = subText,
-			Parent = header,
-		})
-	end
 
 	HeaderButton(header, "close", -12, Theme.Red, function()
 		self:Destroy()
@@ -797,12 +820,11 @@ function Library:CreateWindow(opts)
 		Position = UDim2.fromOffset(10, 67),
 		Size = UDim2.new(0, 168, 1, -77),
 		BackgroundColor3 = Theme.Card,
-		BackgroundTransparency = cardT,
+		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		Parent = main,
 	}, {
 		Corner(12),
-		Stroke(Theme.Glow, 1, 0.72),
 	})
 	self._sidebar = sidebar
 
@@ -1355,7 +1377,7 @@ function Window:_select(tab)
 	for _, t in ipairs(self._tabs) do
 		local active = (t == tab)
 		t.Page.Visible = active
-		Tween(t.Button, 0.15, { BackgroundTransparency = active and activeT or 1 })
+		Tween(t.Button, 0.15, { BackgroundTransparency = active and activeT or TAB_REST_T })
 		t._indicator.Visible = active
 		if t._rgbEntry then
 			t._rgbEntry.active = active
@@ -1394,7 +1416,7 @@ function Window:AddTab(opts)
 	tab.Button = New("TextButton", {
 		Size = self._mobileLayout and UDim2.fromOffset(116, 38) or UDim2.new(1, 0, 0, 42),
 		BackgroundColor3 = Theme.Hover,
-		BackgroundTransparency = 1,
+		BackgroundTransparency = TAB_REST_T,
 		Text = "",
 		AutoButtonColor = false,
 		LayoutOrder = #self._tabs + 1,
@@ -1621,7 +1643,7 @@ end
 --// ===== 6. Tab + komponen =====
 
 function Tab:_row(height, searchText)
-	local rowStroke = Stroke(Theme.Glow, 1, 0.72)
+	local rowStroke = Stroke(Theme.Glow, 1, 0.86)
 	table.insert(self.Window._strokes, rowStroke)
 	rowStroke.Enabled = not self.Window._low
 	local row = New("Frame", {
@@ -1695,15 +1717,15 @@ end
 
 function Tab:AddSection(name)
 	local holder = New("Frame", {
-		Size = UDim2.new(1, 0, 0, 26),
+		Size = UDim2.new(1, 0, 0, 30),
 		BackgroundTransparency = 1,
 		LayoutOrder = self._order,
 		Parent = self.Page,
 	})
 	New("TextLabel", {
 		BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(2, 2),
-		Size = UDim2.new(1, -2, 1, 0),
+		Position = UDim2.fromOffset(2, 0),
+		Size = UDim2.new(1, -2, 1, -6),
 		Font = FONT.Bold,
 		TextSize = 15,
 		TextColor3 = Theme.Text,
@@ -1711,6 +1733,14 @@ function Tab:AddSection(name)
 		Text = tostring(name),
 		Parent = holder,
 	})
+	New("Frame", {
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.new(0, 2, 1, -2),
+		Size = UDim2.new(1, -4, 0, 1),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		BorderSizePixel = 0,
+		Parent = holder,
+	}, { Gradient(0, true) })
 	self._order += 1
 	local sec = { Frame = holder, Text = string.lower(tostring(name)) }
 	table.insert(self._sections, sec)
@@ -2225,17 +2255,7 @@ function Tab:AddDropdown(o)
 		Parent = valueBox,
 	})
 	-- Panah berputar 180 derajat saat dropdown terbuka
-	local arrow = New("TextLabel", {
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(1, -16, 0.5, 0),
-		Size = UDim2.fromOffset(14, 14),
-		BackgroundTransparency = 1,
-		Font = FONT.Bold,
-		TextSize = 12,
-		TextColor3 = Theme.SubText,
-		Text = "v",
-		Parent = valueBox,
-	})
+	local arrow = Chevron(valueBox, UDim2.new(1, -16, 0.5, 0), Theme.SubText)
 	local header = New("TextButton", {
 		Size = UDim2.fromScale(1, 1),
 		BackgroundTransparency = 1,
