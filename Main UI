@@ -187,6 +187,18 @@ end
 --// ===== 3. Tween yang bisa dimatikan (mode hemat) =====
 
 local PERF = { low = false }
+
+local function RecomputePerf()
+	local anyLive = false
+	for _, window in ipairs(Library.Windows) do
+		if window._low ~= true then
+			PERF.low = false
+			return
+		end
+		anyLive = true
+	end
+	PERF.low = anyLive
+end
 local NoTween = { Play = function() end, Cancel = function() end, Pause = function() end }
 
 local function Tween(inst, time, props, style)
@@ -595,6 +607,7 @@ function Library:CreateWindow(opts)
 	self._conns = {}
 	self._tabs = {}
 	self._setters = {}
+	self._validators = {}
 	self._activeTab = nil
 	self._visible = true
 	self._maxed = false
@@ -608,7 +621,6 @@ function Library:CreateWindow(opts)
 	self._perfMode = tostring(opts.Performance or Library.Performance)
 	-- Auto dan Low mulai dengan efek nonaktif; Auto menyalakannya kembali setelah FPS stabil.
 	self._low = self._perfMode == "Low" or self._perfMode == "Auto"
-	PERF.low = self._low
 	self._rgbWanted = opts.RGB ~= false and Library.RGB ~= false
 	self._folder = "XevoraUI/" .. self.Title:gsub("[^%w_%-]", "_")
 	if opts.ConfigFolder then
@@ -1024,9 +1036,17 @@ function Window:_track(conn)
 end
 
 function Window:_flag(flag, value)
-	if flag then
-		self.Flags[flag] = value
+	if flag then self.Flags[flag] = value end
+end
+
+-- Pintu tunggal pendaftaran flag. Flag kembar diperingatkan; yang terakhir dipakai.
+function Window:_registerFlag(flag, setter, validator)
+	if not flag then return end
+	if self._setters[flag] ~= nil then
+		warn("[XevoraUI] Flag '" .. tostring(flag) .. "' terdaftar lebih dari sekali; yang terakhir dipakai.")
 	end
+	self._setters[flag] = setter
+	self._validators[flag] = validator
 end
 
 -- Layout adaptif: lebar panel mengikuti layar (bukan sekadar mengecilkan semuanya),
@@ -1164,12 +1184,11 @@ function Window:Destroy()
 			break
 		end
 	end
-	if #Library.Windows == 0 then
-		PERF.low = false
-	end
+	RecomputePerf()
 end
 
 function Window:Notify(o)
+	if not self.Gui or not self._notifyHolder or not self._notifyHolder.Parent then return end
 	o = o or {}
 	self._notifyOrder += 1
 	local card = New("Frame", {
@@ -1286,48 +1305,79 @@ function Window:SaveConfig(name)
 end
 
 function Window:LoadConfig(name)
-	if typeof(readfile) ~= "function" or typeof(isfile) ~= "function" then
-		return false, "executor tidak mendukung readfile/isfile"
-	end
-	local path = self._folder .. "/" .. safeConfigName(name) .. ".json"
-	local checkOk, exists = pcall(isfile, path)
-	if not checkOk then return false, "gagal memeriksa file config" end
-	if not exists then return false, "file config tidak ditemukan" end
-	local ok, data = pcall(function()
-		local raw = readfile(path)
-		if type(raw) ~= "string" then error("data config bukan teks") end
-		return HttpService:JSONDecode(raw)
-	end)
-	if not ok or type(data) ~= "table" then return false, "file config rusak" end
-	local applied = 0
-	for flag, value in pairs(data) do
-		local setter = self._setters[flag]
-		if setter then
-			local appliedOk = pcall(setter, value)
-			if appliedOk then applied += 1 end
-		end
-	end
-	return true, applied
+        if typeof(readfile) ~= "function" or typeof(isfile) ~= "function" then
+                return false, "executor tidak mendukung readfile/isfile"
+        end
+        local path = self._folder .. "/" .. safeConfigName(name) .. ".json"
+        local checkOk, exists = pcall(isfile, path)
+        if not checkOk then return false, "gagal memeriksa file config" end
+        if not exists then return false, "file config tidak ditemukan" end
+        local ok, data = pcall(function()
+                local raw = readfile(path)
+                if type(raw) ~= "string" then error("data config bukan teks") end
+                return HttpService:JSONDecode(raw)
+        end)
+        if not ok or type(data) ~= "table" then return false, "file config rusak" end
+        local applied = 0
+        local report = { Applied = 0, Skipped = {}, Unknown = {} }
+        for flag, value in pairs(data) do
+                local setter = self._setters[flag]
+                if not setter then
+                        table.insert(report.Unknown, tostring(flag))
+                else
+                        local accepted, normalized = true, value
+                        local validator = self._validators[flag]
+                        if validator then
+                                local ran, vAccepted, vResult = pcall(validator, value)
+                                if ran then
+                                        accepted, normalized = vAccepted, vResult
+                                else
+                                        accepted, normalized = false, "validator error"
+                                end
+                        end
+                        if not accepted then
+                                table.insert(report.Skipped, { Flag = tostring(flag), Reason = tostring(normalized) })
+                        else
+                                local setOk = pcall(setter, normalized)
+                                if setOk then
+                                        applied += 1
+                                else
+                                        table.insert(report.Skipped, { Flag = tostring(flag), Reason = "setter gagal" })
+                                end
+                        end
+                end
+        end
+        report.Applied = applied
+        -- Kompatibel: dua nilai pertama sama seperti sebelumnya (true, jumlah). Nilai ketiga baru.
+        return true, applied, report
 end
 
--- Daftar nama config yang tersimpan. Membutuhkan listfiles dari executor.
+-- Seragam dengan Save/Load: selalu (ok, hasil|pesan).
+function Window:GetConfigs()
+        if typeof(listfiles) ~= "function" then
+                return false, "executor tidak mendukung listfiles"
+        end
+        local ok, files = pcall(listfiles, self._folder)
+        if not ok or type(files) ~= "table" then
+                return false, "gagal membaca folder config"
+        end
+        local names = {}
+        for _, path in ipairs(files) do
+                local name = tostring(path):match("([^/\\\\]+)%.json$")
+                if name then
+                        table.insert(names, name)
+                end
+        end
+        table.sort(names)
+        return true, names
+end
+-- Bentuk lama dipertahankan: sukses mengembalikan tabel nama, gagal mengembalikan false, pesan.
 function Window:ListConfigs()
-	if typeof(listfiles) ~= "function" then
-		return false, "executor tidak mendukung listfiles"
-	end
-	local ok, files = pcall(listfiles, self._folder)
-	if not ok or type(files) ~= "table" then
-		return false, "gagal membaca folder config"
-	end
-	local names = {}
-	for _, path in ipairs(files) do
-		local name = tostring(path):match("([^/\\\\]+)%.json$")
-		if name then
-			table.insert(names, name)
-		end
-	end
-	table.sort(names)
-	return names
+        local ok, result = self:GetConfigs()
+        if not ok then
+                return false, result
+        end
+        return result
 end
 
 -- Hapus satu config berdasarkan nama (tanpa ekstensi).
@@ -1570,7 +1620,7 @@ end
 
 function Window:_applyPerf(low)
 	self._low = low
-	PERF.low = low
+	RecomputePerf()
 	self._rgbOn = self._rgbWanted and not low
 	for _, sh in ipairs(self._shadows) do
 		sh.Visible = not low
@@ -1606,13 +1656,13 @@ function Window:_probeFPS()
 			local low = fps < 32
 			if low ~= self._low then
 				self:_applyPerf(low)
-				if low then
-					self:Notify({
-						Title = "Mode hemat aktif",
-						Content = string.format("FPS rendah (%d). Efek berat dimatikan.", math.floor(fps)),
-						Duration = 4,
-					})
-				end
+			end
+			if low then
+				self:Notify({
+					Title = "Mode hemat aktif",
+					Content = string.format("FPS rendah (%d). Efek berat dimatikan.", math.floor(fps)),
+					Duration = 4,
+				})
 			end
 		end
 	end)
@@ -1860,9 +1910,10 @@ function Tab:AddToggle(o)
 	render(false)
 	window:_flag(o.Flag, value)
 	if o.Flag then
-		window._setters[o.Flag] = function(v)
-			obj:Set(v)
-		end
+		window:_registerFlag(o.Flag, function(v) obj:Set(v) end, function(v)
+			if type(v) ~= "boolean" then return false, "harus boolean" end
+			return true, v
+		end)
 	end
 	if value then
 		task.defer(SafeCall, o.Callback, value)
@@ -2000,7 +2051,10 @@ function Tab:AddSlider(o)
 
 	obj:Set(value, true)
 	if o.Flag then
-		window._setters[o.Flag] = function(v) obj:Set(v) end
+		window:_registerFlag(o.Flag, function(v) obj:Set(v) end, function(v)
+			if type(v) ~= "number" or v ~= v or v == math.huge or v == -math.huge then return false, "harus angka" end
+			return true, v
+		end)
 	end
 	task.defer(SafeCall, o.Callback, value)
 	return obj
@@ -2080,9 +2134,14 @@ function Tab:AddInput(o)
 		obj:Set(o.Default, true)
 	end
 	if o.Flag then
-		window._setters[o.Flag] = function(v)
-			obj:Set(v)
-		end
+		window:_registerFlag(o.Flag, function(v) obj:Set(v) end, function(v)
+			if o.Numeric then
+				if type(v) ~= "number" or v ~= v or v == math.huge or v == -math.huge then return false, "harus angka" end
+				return true, v
+			end
+			if type(v) ~= "string" then return false, "harus teks" end
+			return true, v
+		end)
 	end
 	return obj
 end
@@ -2172,9 +2231,12 @@ function Tab:AddKeybind(o)
 
 	window:_flag(o.Flag, key.Name)
 	if o.Flag then
-		window._setters[o.Flag] = function(value)
-			obj:Set(value, true)
-		end
+		window:_registerFlag(o.Flag, function(v) obj:Set(v, true) end, function(v)
+			if type(v) ~= "string" then return false, "harus nama tombol" end
+			local okEnum, item = pcall(function() return Enum.KeyCode[v] end)
+			if not okEnum or not item then return false, "tombol tidak dikenal" end
+			return true, v
+		end)
 	end
 	return obj
 end
@@ -2496,6 +2558,7 @@ function Tab:AddDropdown(o)
 			single = nil
 		end
 		updateText()
+		window:_flag(o.Flag, currentValue())
 	end
 
 	header.MouseButton1Click:Connect(function()
@@ -2511,9 +2574,21 @@ function Tab:AddDropdown(o)
 		task.defer(SafeCall, o.Callback, currentValue())
 	end
 	if o.Flag then
-		window._setters[o.Flag] = function(v)
-			obj:Set(v)
-		end
+		window:_registerFlag(o.Flag, function(v) obj:Set(v) end, function(v)
+			if multi then
+				if type(v) ~= "table" then return false, "harus daftar pilihan" end
+				if #v == 0 and next(v) ~= nil then return false, "format daftar salah" end
+				local clean = {}
+				for _, item in ipairs(v) do
+					local text = tostring(item)
+					if table.find(options, text) then table.insert(clean, text) end
+				end
+				return true, clean
+			end
+			if type(v) ~= "string" then return false, "harus teks" end
+			if not table.find(options, v) then return false, "pilihan tidak ada di daftar" end
+			return true, v
+		end)
 	end
 	return obj
 end
@@ -3115,88 +3190,11 @@ function Tab:AddProgressBar(o)
         end
         obj:Set(o.Default ~= nil and o.Default or min, true)
         if o.Flag then
-                window:_registerFlag(o.Flag, function(v) obj:Set(v, true) end)
-        end
-        return obj
-end
-
-function Tab:AddLabel(text, height)
-        local row = self:_row(height or 38, text)
-        local lbl = New("TextLabel", {
-                BackgroundTransparency = 1,
-                Position = UDim2.fromOffset(14, 0),
-                Size = UDim2.new(1, -28, 1, 0),
-                Font = FONT.Regular,
-                TextSize = 12,
-                TextWrapped = true,
-                TextColor3 = Theme.SubText,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                Text = tostring(text),
-                Parent = row,
-        })
-        local obj = {}
-        function obj:Set(t)
-                lbl.Text = tostring(t)
-        end
-        return obj
-end
-
-function Tab:AddButton(o)
-        o = o or {}
-        local hasDesc = o.Desc ~= nil and o.Desc ~= ""
-        local row = self:_row(hasDesc and 58 or 50, tostring(o.Name or "") .. " " .. tostring(o.Desc or ""))
-        self:_title(row, o.Name or "Button", hasDesc and o.Desc or nil, -132)
-
-        -- Chip aksi di kanan: garis gradasi biru -> merah, terisi gradasi saat ditekan
-        local chip = New("Frame", {
-                AnchorPoint = Vector2.new(1, 0.5),
-                Position = UDim2.new(1, -12, 0.5, 0),
-                Size = UDim2.fromOffset(100, 34),
-                BackgroundTransparency = 1,
-                Parent = row,
-        }, {
-                Corner(10),
-                GradStroke(1.5, 0, 0.1),
-        })
-        local fill = New("Frame", {
-                Size = UDim2.fromScale(1, 1),
-                BackgroundColor3 = Color3.new(1, 1, 1),
-                BackgroundTransparency = 1,
-                BorderSizePixel = 0,
-                Parent = chip,
-        }, { Corner(10), Gradient(0) })
-        New("TextLabel", {
-                Size = UDim2.fromScale(1, 1),
-                BackgroundTransparency = 1,
-                Font = FONT.Semi,
-                TextSize = 13,
-                TextColor3 = Theme.Text,
-                Text = tostring(o.Text or "Jalankan"),
-                Parent = chip,
-        })
-
-        local btn = New("TextButton", {
-                Size = UDim2.fromScale(1, 1),
-                BackgroundTransparency = 1,
-                Text = "",
-                Parent = row,
-        })
-        Pressable(btn, row, Theme.Card, Theme.Hover)
-        btn.MouseButton1Down:Connect(function()
-                Tween(fill, 0.08, { BackgroundTransparency = 0.25 })
-        end)
-        local function release()
-                Tween(fill, 0.2, { BackgroundTransparency = 1 })
-        end
-        btn.MouseButton1Up:Connect(release)
-        btn.MouseLeave:Connect(release)
-        btn.MouseButton1Click:Connect(function()
-                SafeCall(o.Callback)
-        end)
-        local obj = {}
-        function obj:Fire()
-                SafeCall(o.Callback)
-        end
+			window:_registerFlag(o.Flag, function(v) obj:Set(v, true) end, function(v)
+				if type(v) ~= "number" or v ~= v or v == math.huge or v == -math.huge then return false, "harus angka" end
+				return true, v
+			end)
+		end
         return obj
 end
 
