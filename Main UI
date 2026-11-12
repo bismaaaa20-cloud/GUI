@@ -189,11 +189,15 @@ end
 local PERF = { low = false }
 
 local function RecomputePerf()
-	local low = false
+	local anyLive = false
 	for _, window in ipairs(Library.Windows) do
-		if window and window._low then low = true break end
+		if window._low ~= true then
+			PERF.low = false
+			return
+		end
+		anyLive = true
 	end
-	PERF.low = low
+	PERF.low = anyLive
 end
 local NoTween = { Play = function() end, Cancel = function() end, Pause = function() end }
 
@@ -617,7 +621,6 @@ function Library:CreateWindow(opts)
 	self._perfMode = tostring(opts.Performance or Library.Performance)
 	-- Auto dan Low mulai dengan efek nonaktif; Auto menyalakannya kembali setelah FPS stabil.
 	self._low = self._perfMode == "Low" or self._perfMode == "Auto"
-	RecomputePerf()
 	self._rgbWanted = opts.RGB ~= false and Library.RGB ~= false
 	self._folder = "XevoraUI/" .. self.Title:gsub("[^%w_%-]", "_")
 	if opts.ConfigFolder then
@@ -1302,78 +1305,79 @@ function Window:SaveConfig(name)
 end
 
 function Window:LoadConfig(name)
-	if typeof(readfile) ~= "function" or typeof(isfile) ~= "function" then
-		return false, "executor tidak mendukung readfile/isfile"
-	end
-	local path = self._folder .. "/" .. safeConfigName(name) .. ".json"
-	local checkOk, exists = pcall(isfile, path)
-	if not checkOk then return false, "gagal memeriksa file config" end
-	if not exists then return false, "file config tidak ditemukan" end
-	local ok, data = pcall(function()
-		local raw = readfile(path)
-		if type(raw) ~= "string" then error("data config bukan teks") end
-		return HttpService:JSONDecode(raw)
-	end)
-	if not ok or type(data) ~= "table" then return false, "file config rusak" end
-	local applied = 0
-	local report = { Applied = {}, Skipped = {}, Unknown = {} }
-	for flag, value in pairs(data) do
-		local setter = self._setters[flag]
-		if not setter then
-			table.insert(report.Unknown, flag)
-		else
-			local valid, cleanValue, reason = true, value, nil
-			local validator = self._validators[flag]
-			if validator then
-				local checkOk, accepted, normalized = pcall(validator, value)
-				if not checkOk then
-					valid, reason = false, tostring(accepted)
-				elseif accepted ~= true then
-					valid, reason = false, tostring(normalized or "nilai tidak valid")
-				else
-					cleanValue = normalized
-				end
-			end
-			if valid then
-				local appliedOk, applyErr = pcall(setter, cleanValue)
-				if appliedOk then
-					applied += 1
-					table.insert(report.Applied, flag)
-				else
-					valid, reason = false, tostring(applyErr)
-				end
-			end
-			if not valid then table.insert(report.Skipped, { Flag = flag, Reason = reason or "nilai tidak valid" }) end
-		end
-	end
-	return true, applied, report
+        if typeof(readfile) ~= "function" or typeof(isfile) ~= "function" then
+                return false, "executor tidak mendukung readfile/isfile"
+        end
+        local path = self._folder .. "/" .. safeConfigName(name) .. ".json"
+        local checkOk, exists = pcall(isfile, path)
+        if not checkOk then return false, "gagal memeriksa file config" end
+        if not exists then return false, "file config tidak ditemukan" end
+        local ok, data = pcall(function()
+                local raw = readfile(path)
+                if type(raw) ~= "string" then error("data config bukan teks") end
+                return HttpService:JSONDecode(raw)
+        end)
+        if not ok or type(data) ~= "table" then return false, "file config rusak" end
+        local applied = 0
+        local report = { Applied = 0, Skipped = {}, Unknown = {} }
+        for flag, value in pairs(data) do
+                local setter = self._setters[flag]
+                if not setter then
+                        table.insert(report.Unknown, tostring(flag))
+                else
+                        local accepted, normalized = true, value
+                        local validator = self._validators[flag]
+                        if validator then
+                                local ran, vAccepted, vResult = pcall(validator, value)
+                                if ran then
+                                        accepted, normalized = vAccepted, vResult
+                                else
+                                        accepted, normalized = false, "validator error"
+                                end
+                        end
+                        if not accepted then
+                                table.insert(report.Skipped, { Flag = tostring(flag), Reason = tostring(normalized) })
+                        else
+                                local setOk = pcall(setter, normalized)
+                                if setOk then
+                                        applied += 1
+                                else
+                                        table.insert(report.Skipped, { Flag = tostring(flag), Reason = "setter gagal" })
+                                end
+                        end
+                end
+        end
+        report.Applied = applied
+        -- Kompatibel: dua nilai pertama sama seperti sebelumnya (true, jumlah). Nilai ketiga baru.
+        return true, applied, report
 end
 
--- Daftar nama config yang tersimpan. Membutuhkan listfiles dari executor.
-function Window:ListConfigs()
-	if typeof(listfiles) ~= "function" then
-		return false, "executor tidak mendukung listfiles"
-	end
-	local ok, files = pcall(listfiles, self._folder)
-	if not ok or type(files) ~= "table" then
-		return false, "gagal membaca folder config"
-	end
-	local names = {}
-	for _, path in ipairs(files) do
-		local name = tostring(path):match("([^/\\\\]+)%.json$")
-		if name then
-			table.insert(names, name)
-		end
-	end
-	table.sort(names)
-	return names
-end
-
--- Alias berkontrak boolean: sukses, daftar nama config.
+-- Seragam dengan Save/Load: selalu (ok, hasil|pesan).
 function Window:GetConfigs()
-	local names, err = self:ListConfigs()
-	if names == false then return false, err end
-	return true, names
+        if typeof(listfiles) ~= "function" then
+                return false, "executor tidak mendukung listfiles"
+        end
+        local ok, files = pcall(listfiles, self._folder)
+        if not ok or type(files) ~= "table" then
+                return false, "gagal membaca folder config"
+        end
+        local names = {}
+        for _, path in ipairs(files) do
+                local name = tostring(path):match("([^/\\\\]+)%.json$")
+                if name then
+                        table.insert(names, name)
+                end
+        end
+        table.sort(names)
+        return true, names
+end
+-- Bentuk lama dipertahankan: sukses mengembalikan tabel nama, gagal mengembalikan false, pesan.
+function Window:ListConfigs()
+        local ok, result = self:GetConfigs()
+        if not ok then
+                return false, result
+        end
+        return result
 end
 
 -- Hapus satu config berdasarkan nama (tanpa ekstensi).
@@ -1652,13 +1656,13 @@ function Window:_probeFPS()
 			local low = fps < 32
 			if low ~= self._low then
 				self:_applyPerf(low)
-				if low then
-					self:Notify({
-						Title = "Mode hemat aktif",
-						Content = string.format("FPS rendah (%d). Efek berat dimatikan.", math.floor(fps)),
-						Duration = 4,
-					})
-				end
+			end
+			if low then
+				self:Notify({
+					Title = "Mode hemat aktif",
+					Content = string.format("FPS rendah (%d). Efek berat dimatikan.", math.floor(fps)),
+					Duration = 4,
+				})
 			end
 		end
 	end)
