@@ -3508,4 +3508,736 @@ function Library:SendDiscordWebhook(url, options)
         return self:SendWebhook(url, payload)
 end
 
+
+--// XevoraUI Glass Pack. Tempel TEPAT SEBELUM baris return Library.
+do
+	local GuiService = game:GetService("GuiService")
+
+	local function ShouldFire(o)
+		return o.FireOnInit == true or (o.Default ~= nil and o.FireOnInit ~= false)
+	end
+	local function Near(a, b)
+		return math.abs(a.R - b.R) + math.abs(a.G - b.G) + math.abs(a.B - b.B) < 0.006
+	end
+	local function ThemeKey(c)
+		if typeof(c) ~= "Color3" then return nil end
+		for k, v in pairs(Theme) do
+			if typeof(v) == "Color3" and Near(v, c) then return k end
+		end
+		return nil
+	end
+
+	Pressable = function(btn, target, normal, pressed)
+		local nk, pk = ThemeKey(normal), ThemeKey(pressed)
+		btn.MouseButton1Down:Connect(function()
+			Tween(target, 0.07, { BackgroundColor3 = pk and Theme[pk] or pressed })
+		end)
+		local function release()
+			Tween(target, 0.16, { BackgroundColor3 = nk and Theme[nk] or normal })
+		end
+		btn.MouseButton1Up:Connect(release)
+		btn.MouseLeave:Connect(release)
+	end
+
+	--// ===== Preset tema =====
+	Library.ToggleStyle = Library.ToggleStyle or "Checkbox"
+	Library.Presets = {
+		["Dark Glass"] = { Background = "#010101", Panel = "#050505", Card = "#0B0B0B", Secondary = "#141414", Hover = "#1E1E1E", Off = "#2A2A2A", Border = "#2E2E2E", Glow = "#8C8C8C", Blue = "#E2B33A", Cyan = "#F2D27A", Purple = "#9B6BFF", Red = "#FF526D", Soft = "#EDEDED", Text = "#F5F5F5", SubText = "#A0A0A0", PanelT = 0.38, CardT = 0.45, FieldT = 0.5 },
+		["Redz Blue"] = { Background = "#020204", Panel = "#07080C", Card = "#0E1016", Secondary = "#161922", Hover = "#20242F", Off = "#2C313D", Border = "#2A2F3B", Glow = "#7C8AB8", Blue = "#5685FF", Cyan = "#8FB8FF", Purple = "#9B6BFF", Red = "#FF526D", Soft = "#DCE6FF", Text = "#F2F5FF", SubText = "#98A0B8", PanelT = 0.15, CardT = 0.2, FieldT = 0.3 },
+		["Classic"] = { Background = "#0A0F1B", Panel = "#0E1422", Card = "#141B2E", Secondary = "#1A2338", Hover = "#212C47", Off = "#2B3550", Border = "#263150", Glow = "#5A78D2", Blue = "#5685FF", Cyan = "#8FB8FF", Purple = "#9B6BFF", Red = "#FF526D", Soft = "#DCE6FF", Text = "#F2F5FF", SubText = "#98A4C4", PanelT = 0.06, CardT = 0.12, FieldT = 0.18 },
+	}
+
+	function Window:_retheme(old)
+		if not self.Gui then return end
+		local map = {}
+		for k, oc in pairs(old) do
+			local nc = Theme[k]
+			if nc ~= oc then table.insert(map, { oc, nc }) end
+		end
+		if #map == 0 then return end
+		local function swap(c)
+			for _, m in ipairs(map) do
+				if Near(c, m[1]) then return m[2] end
+			end
+			return c
+		end
+		local function put(obj, prop)
+			local c = obj[prop]
+			local n = swap(c)
+			if n ~= c then obj[prop] = n end
+		end
+		for _, d in ipairs(self.Gui:GetDescendants()) do
+			if d:IsA("GuiObject") then
+				put(d, "BackgroundColor3")
+				if d:IsA("TextLabel") or d:IsA("TextButton") or d:IsA("TextBox") then
+					put(d, "TextColor3")
+					if d:IsA("TextBox") then put(d, "PlaceholderColor3") end
+				elseif d:IsA("ImageLabel") or d:IsA("ImageButton") then
+					put(d, "ImageColor3")
+				elseif d:IsA("ScrollingFrame") then
+					put(d, "ScrollBarImageColor3")
+				end
+			elseif d:IsA("UIStroke") then
+				put(d, "Color")
+			elseif d:IsA("UIGradient") then
+				local out, changed = {}, false
+				for _, kp in ipairs(d.Color.Keypoints) do
+					local n = swap(kp.Value)
+					if n ~= kp.Value then changed = true end
+					table.insert(out, ColorSequenceKeypoint.new(kp.Time, n))
+				end
+				if changed then d.Color = ColorSequence.new(out) end
+			end
+		end
+	end
+
+	function Window:SetTransparency(panelT, cardT, fieldT)
+		if not self.Gui then return end
+		panelT = math.clamp(tonumber(panelT) or self._panelT or 0.38, 0, 0.7)
+		cardT = math.clamp(tonumber(cardT) or self._cardT, 0, 0.8)
+		fieldT = math.clamp(tonumber(fieldT) or (cardT + 0.05), 0, 0.85)
+		local oc, of = self._cardT, self._fieldT
+		for _, d in ipairs(self.Main:GetDescendants()) do
+			if d:IsA("GuiObject") then
+				local bt = d.BackgroundTransparency
+				if math.abs(bt - oc) < 0.002 then
+					d.BackgroundTransparency = cardT
+				elseif math.abs(bt - of) < 0.002 then
+					d.BackgroundTransparency = fieldT
+				end
+			end
+		end
+		self._panelT, self._cardT, self._fieldT = panelT, cardT, fieldT
+		self.Main.BackgroundTransparency = panelT
+	end
+
+	function Library:SetTheme(name)
+		local p = Library.Presets[name]
+		if not p then return false end
+		local old = {}
+		for k, v in pairs(Theme) do old[k] = v end
+		for k, v in pairs(p) do
+			if type(v) == "string" then Theme[k] = Color3.fromHex(v) end
+		end
+		Library.ThemeName = name
+		Library.PanelTransparency, Library.CardTransparency, Library.FieldTransparency = p.PanelT, p.CardT, p.FieldT
+		for _, w in ipairs(Library.Windows) do
+			w:_retheme(old)
+			w:SetTransparency(p.PanelT, p.CardT, p.FieldT)
+		end
+		return true
+	end
+
+	function Library:SetAccent(color)
+		if typeof(color) ~= "Color3" then return false end
+		local old = {}
+		for k, v in pairs(Theme) do old[k] = v end
+		Theme.Blue = color
+		Theme.Cyan = color:Lerp(Color3.new(1, 1, 1), 0.35)
+		for _, w in ipairs(Library.Windows) do w:_retheme(old) end
+		return true
+	end
+
+	--// ===== Flag, log, FPS =====
+	function Window:GetFlag(flag)
+		return self.Flags[flag]
+	end
+
+	function Window:SetFlag(flag, value)
+		local setter = self._setters[flag]
+		if not setter then return false, "flag tidak terdaftar" end
+		local v = value
+		local validator = self._validators[flag]
+		if validator then
+			local ran, ok, res = pcall(validator, value)
+			if not ran or not ok then return false, tostring(res or "nilai ditolak") end
+			v = res
+		end
+		local ok, err = pcall(setter, v)
+		if not ok then return false, tostring(err) end
+		return true
+	end
+
+	function Window:Log(text, level)
+		self._log = self._log or {}
+		table.insert(self._log, string.format("[%s] %s", string.upper(tostring(level or "info")), tostring(text)))
+		while #self._log > 60 do table.remove(self._log, 1) end
+		if self._logView then
+			self._logView:SetContent(table.concat(self._log, "\n", math.max(1, #self._log - 9)))
+		end
+	end
+
+	function Window:_probeFPS()
+		if self._probing then return end
+		self._probing = true
+		task.spawn(function()
+			task.wait(3)
+			local samples = {}
+			for _ = 1, 3 do
+				local frames, t0 = 0, os.clock()
+				local conn = RunService.Heartbeat:Connect(function() frames += 1 end)
+				task.wait(1)
+				conn:Disconnect()
+				table.insert(samples, frames / math.max(os.clock() - t0, 0.1))
+			end
+			self._probing = false
+			if not self.Gui then return end
+			table.sort(samples)
+			local fps = samples[2]
+			self.FPS = fps
+			if self._perfMode == "Auto" then
+				local low = fps < 24
+				if low ~= self._low then self:_applyPerf(low) end
+				if low then
+					self:Notify({ Title = "Mode hemat aktif", Content = string.format("FPS rendah (%d). Efek berat dimatikan.", math.floor(fps)), Type = "warn" })
+				end
+			end
+		end)
+	end
+
+	--// ===== CreateWindow dibungkus (probe FPS, ikon menempel, judul unik) =====
+	local baseCreate = Library.CreateWindow
+	function Library:CreateWindow(opts)
+		local o = {}
+		for k, v in pairs(opts or {}) do o[k] = v end
+		local mode = tostring(o.Performance or Library.Performance)
+		if mode == "Auto" then o.Performance = "High" end
+		if o.KeepExisting then
+			local base, n = tostring(o.Title or "XevoraHub"), 0
+			for _, w in ipairs(Library.Windows) do
+				if w.Title:sub(1, #base) == base then n += 1 end
+			end
+			if n > 0 then o.Title = base .. " #" .. (n + 1) end
+		end
+		local win = baseCreate(self, o)
+		if not win then return nil end
+		win._panelT = math.clamp(o.PanelTransparency or Library.PanelTransparency, 0, 0.7)
+		if mode == "Auto" then
+			win._perfMode = "Auto"
+			win:_probeFPS()
+		end
+		local btn = o.SnapIcon ~= false and win.Gui and win.Gui:FindFirstChild("ToggleIcon")
+		if btn then
+			btn.InputBegan:Connect(function(input)
+				if not IsPress(input) then return end
+				local startPos = btn.AbsolutePosition
+				local conn
+				conn = input.Changed:Connect(function()
+					if input.UserInputState ~= Enum.UserInputState.End then return end
+					conn:Disconnect()
+					local p, sz = btn.AbsolutePosition, btn.AbsoluteSize
+					if (p - startPos).Magnitude < 8 then return end
+					local cam = workspace.CurrentCamera
+					local vp = cam and cam.ViewportSize or Vector2.new(800, 400)
+					local x = (p.X + sz.X / 2 < vp.X / 2) and 8 or (vp.X - sz.X - 8)
+					local y = math.clamp(p.Y, 8, vp.Y - sz.Y - 8)
+					Tween(btn, 0.2, { Position = UDim2.fromOffset(x, y) })
+				end)
+			end)
+		end
+		return win
+	end
+
+	--// ===== Notifikasi bertipe, batas tumpukan, anti-duplikat =====
+	local KINDS = { info = true, success = true, warn = true, error = true }
+	function Window:Notify(o)
+		if not self.Gui or not self._notifyHolder or not self._notifyHolder.Parent then return end
+		o = type(o) == "table" and o or { Title = tostring(o) }
+		local kind = KINDS[o.Type] and o.Type or "info"
+		local title = tostring(o.Title or "Notifikasi")
+		local content = o.Content ~= nil and tostring(o.Content) or nil
+		self:Log(content and (title .. ": " .. content) or title, kind)
+		local now, key = os.clock(), kind .. "|" .. title .. "|" .. tostring(content)
+		self._notifySeen = self._notifySeen or {}
+		if o.Dedupe ~= false then
+			if self._notifySeen[key] and now - self._notifySeen[key] < 1.5 then return end
+			self._notifySeen[key] = now
+		end
+		for k, t in pairs(self._notifySeen) do
+			if now - t > 10 then self._notifySeen[k] = nil end
+		end
+		self._notifyCards = self._notifyCards or {}
+		while #self._notifyCards >= 5 do
+			local first = table.remove(self._notifyCards, 1)
+			if first and first.Parent then first:Destroy() end
+		end
+		local accent = kind == "success" and Color3.fromHex("#5BD99A")
+			or kind == "warn" and Color3.fromHex("#F2C94C")
+			or kind == "error" and Theme.Red or Theme.Blue
+		self._notifyOrder += 1
+		local card = New("Frame", {
+			Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundColor3 = Theme.Card,
+			BorderSizePixel = 0, LayoutOrder = self._notifyOrder, Parent = self._notifyHolder,
+		}, { Corner(12), Stroke(Theme.Border, 1, 0) })
+		table.insert(self._notifyCards, card)
+		New("Frame", {
+			Size = UDim2.new(0, 3, 1, -16), Position = UDim2.fromOffset(8, 8), BackgroundColor3 = accent,
+			BorderSizePixel = 0, Parent = card,
+		}, { Corner(2) })
+		local body = New("Frame", {
+			Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1, Parent = card,
+		}, { Pad(24, 11, 14, 11), New("UIListLayout", { Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder }) })
+		local labels = {}
+		local function line(text, size, font, color, order)
+			table.insert(labels, New("TextLabel", {
+				Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+				Font = font, TextSize = size, TextColor3 = color, TextXAlignment = Enum.TextXAlignment.Left,
+				TextWrapped = true, TextTransparency = 1, Text = text, LayoutOrder = order, Parent = body,
+			}))
+		end
+		line(title, 14, FONT.Semi, Theme.Text, 1)
+		if content then line(content, 12, FONT.Regular, Theme.SubText, 2) end
+		card.BackgroundTransparency = 1
+		Tween(card, 0.22, { BackgroundTransparency = 0.05 })
+		for _, l in ipairs(labels) do Tween(l, 0.22, { TextTransparency = 0 }) end
+		local duration = tonumber(o.Duration) or 4
+		if duration ~= duration or duration == math.huge or duration == -math.huge then duration = 4 end
+		duration = math.clamp(duration, 0.5, 30)
+		task.delay(duration, function()
+			local i = table.find(self._notifyCards, card)
+			if i then table.remove(self._notifyCards, i) end
+			if not (card and card.Parent) then return end
+			Tween(card, 0.25, { BackgroundTransparency = 1 })
+			for _, l in ipairs(labels) do
+				if l.Parent then Tween(l, 0.25, { TextTransparency = 1 }) end
+			end
+			task.delay(0.27, function()
+				if card and card.Parent then card:Destroy() end
+			end)
+		end)
+	end
+
+	--// ===== Dialog konfirmasi =====
+	function Window:Confirm(o)
+		o = o or {}
+		if not self.Gui or self._confirming then return end
+		self._confirming = true
+		if self._closePopup then self._closePopup() end
+		local overlay = New("TextButton", {
+			Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.45,
+			Text = "", AutoButtonColor = false, ZIndex = 60, Parent = self.Main,
+		})
+		local card = New("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.new(0, 280, 0, 0),
+			AutomaticSize = Enum.AutomaticSize.Y, BackgroundColor3 = Theme.Card, BorderSizePixel = 0, Active = true,
+			Parent = overlay,
+		}, {
+			Corner(12), Stroke(Theme.Blue, 1, 0.35), Pad(16, 14, 16, 14),
+			New("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder }),
+		})
+		local function label(text, size, font, color, order)
+			New("TextLabel", {
+				BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+				Font = font, TextSize = size, TextColor3 = color, TextWrapped = true,
+				TextXAlignment = Enum.TextXAlignment.Left, Text = text, LayoutOrder = order, Parent = card,
+			})
+		end
+		label(tostring(o.Title or "Konfirmasi"), 15, FONT.Bold, Theme.Text, 1)
+		if o.Content then label(tostring(o.Content), 12, FONT.Regular, Theme.SubText, 2) end
+		local btns = New("Frame", { Size = UDim2.new(1, 0, 0, 38), BackgroundTransparency = 1, LayoutOrder = 3, Parent = card })
+		local function close(result)
+			if not self._confirming then return end
+			self._confirming = false
+			if overlay.Parent then overlay:Destroy() end
+			SafeCall(o.Callback, result)
+		end
+		local function button(text, primary, right)
+			local b = New("TextButton", {
+				AnchorPoint = Vector2.new(right and 1 or 0, 0), Position = UDim2.fromScale(right and 1 or 0, 0),
+				Size = UDim2.new(0.5, -5, 1, 0), BackgroundColor3 = primary and Theme.Blue or Theme.Secondary,
+				AutoButtonColor = false, Text = text, Font = FONT.Semi, TextSize = 13,
+				TextColor3 = primary and Theme.Background or Theme.Text, Parent = btns,
+			}, { Corner(9) })
+			b.MouseButton1Click:Connect(function() close(primary) end)
+		end
+		button(tostring(o.No or "Batal"), false, false)
+		button(tostring(o.Yes or "Ya"), true, true)
+		overlay.MouseButton1Click:Connect(function() close(false) end)
+	end
+
+	--// ===== Komponen =====
+	function Tab:AddSection(name)
+		local holder = New("Frame", {
+			Size = UDim2.new(1, 0, 0, 34), BackgroundTransparency = 1, LayoutOrder = self._order, Parent = self.Page,
+		})
+		New("TextLabel", {
+			BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 24), Font = FONT.Bold, TextSize = 15,
+			TextColor3 = Theme.Blue, TextXAlignment = Enum.TextXAlignment.Center, Text = tostring(name), Parent = holder,
+		})
+		New("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 27), Size = UDim2.new(0.9, 0, 0, 1),
+			BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, Parent = holder,
+		}, {
+			New("UIGradient", {
+				Color = ColorSequence.new(Theme.Blue, Theme.Cyan),
+				Transparency = NumberSequence.new({
+					NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.5, 0), NumberSequenceKeypoint.new(1, 1),
+				}),
+			}),
+		})
+		self._order += 1
+		local sec = { Frame = holder, Text = string.lower(tostring(name)) }
+		table.insert(self._sections, sec)
+		self._currentSection = sec
+	end
+
+	function Tab:AddToggle(o)
+		o = o or {}
+		local window = self.Window
+		local checkbox = (o.Style or Library.ToggleStyle) == "Checkbox"
+		local hasDesc = o.Desc ~= nil and o.Desc ~= ""
+		local row = self:_row(hasDesc and 56 or 48, tostring(o.Name or "") .. " " .. tostring(o.Desc or ""))
+		self:_title(row, o.Name or "Toggle", hasDesc and o.Desc or nil, checkbox and -52 or -76)
+		local switch, knob
+		if checkbox then
+			switch = New("Frame", {
+				AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -14, 0.5, 0), Size = UDim2.fromOffset(24, 24),
+				BackgroundTransparency = 1, BorderSizePixel = 0, Parent = row,
+			}, { Corner(6), Stroke(Theme.Blue, 2, 0) })
+			knob = New("Frame", {
+				AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(12, 12),
+				BackgroundColor3 = Theme.Blue, BackgroundTransparency = 1, BorderSizePixel = 0, Parent = switch,
+			}, { Corner(3) })
+		else
+			switch = New("Frame", {
+				AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -14, 0.5, 0), Size = UDim2.fromOffset(46, 26),
+				BackgroundColor3 = Theme.Off, BorderSizePixel = 0, Parent = row,
+			}, { Corner(0, 1) })
+			knob = New("Frame", {
+				Position = UDim2.fromOffset(3, 3), Size = UDim2.fromOffset(20, 20), BackgroundColor3 = Theme.Soft,
+				BorderSizePixel = 0, Parent = switch,
+			}, { Corner(0, 1) })
+		end
+		local btn = New("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", Parent = row })
+		Pressable(btn, row, Theme.Card, Theme.Hover)
+		local value = o.Default == true
+		local function render(animate)
+			if checkbox then
+				local t = value and 0 or 1
+				if animate then Tween(knob, 0.14, { BackgroundTransparency = t }) else knob.BackgroundTransparency = t end
+				return
+			end
+			local pos = value and UDim2.fromOffset(23, 3) or UDim2.fromOffset(3, 3)
+			local col = value and Theme.Blue or Theme.Off
+			if animate then
+				Tween(knob, 0.18, { Position = pos }, Enum.EasingStyle.Back)
+				Tween(switch, 0.16, { BackgroundColor3 = col })
+			else
+				knob.Position = pos
+				switch.BackgroundColor3 = col
+			end
+		end
+		local obj = {}
+		function obj:Set(v, silent)
+			value = v and true or false
+			render(true)
+			window:_flag(o.Flag, value)
+			if not silent then SafeCall(o.Callback, value) end
+		end
+		function obj:Get() return value end
+		btn.MouseButton1Click:Connect(function() obj:Set(not value) end)
+		render(false)
+		window:_flag(o.Flag, value)
+		if o.Flag then
+			window:_registerFlag(o.Flag, function(v) obj:Set(v) end, function(v)
+				if type(v) ~= "boolean" then return false, "harus boolean" end
+				return true, v
+			end)
+		end
+		if (value and o.FireOnInit ~= false) or o.FireOnInit == true then
+			task.defer(SafeCall, o.Callback, value)
+		end
+		return obj
+	end
+
+	local baseSlider = Tab.AddSlider
+	function Tab:AddSlider(o)
+		o = o or {}
+		local o2 = {}
+		for k, v in pairs(o) do o2[k] = v end
+		local cb, ready = o.Callback, o.FireOnInit ~= false
+		o2.Callback = function(v) if ready then SafeCall(cb, v) end end
+		local obj = baseSlider(self, o2)
+		if not ready then task.defer(function() ready = true end) end
+		return obj
+	end
+
+	function Tab:AddLabel(text, minHeight)
+		local row = self:_row(tonumber(minHeight) or 38, text)
+		row.AutomaticSize = Enum.AutomaticSize.Y
+		Pad(14, 10, 14, 10).Parent = row
+		local lbl = New("TextLabel", {
+			BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+			Font = FONT.Regular, TextSize = 12, TextWrapped = true, TextColor3 = Theme.SubText,
+			TextXAlignment = Enum.TextXAlignment.Left, Text = tostring(text), Parent = row,
+		})
+		local obj = {}
+		function obj:Set(t) lbl.Text = tostring(t) end
+		return obj
+	end
+
+	function Tab:AddParagraph(o)
+		o = type(o) == "table" and o or { Content = tostring(o or "") }
+		local title, content = tostring(o.Title or "Information"), tostring(o.Content or "")
+		local row = self:_row(tonumber(o.Height) or 60, title .. " " .. content)
+		row.AutomaticSize = Enum.AutomaticSize.Y
+		Pad(14, 9, 14, 10).Parent = row
+		New("UIListLayout", { Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder, Parent = row })
+		local tl = New("TextLabel", {
+			BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 20), Font = FONT.Semi, TextSize = 14,
+			TextColor3 = Theme.Text, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+			Text = title, LayoutOrder = 1, Parent = row,
+		})
+		local cl = New("TextLabel", {
+			BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+			Font = FONT.Regular, TextSize = 12, TextColor3 = Theme.SubText, TextXAlignment = Enum.TextXAlignment.Left,
+			TextYAlignment = Enum.TextYAlignment.Top, TextWrapped = true, Text = content, LayoutOrder = 2, Parent = row,
+		})
+		local obj = {}
+		function obj:SetTitle(v) tl.Text = tostring(v or "") end
+		function obj:SetContent(v) cl.Text = tostring(v or "") end
+		return obj
+	end
+
+	function Tab:AddColorPicker(o)
+		o = o or {}
+		local window, page = self.Window, self.Page
+		local h, s, v = 0, 0, 1
+		local CLOSED, OPEN = 52, 220
+		local function hex(c)
+			return string.format("%02X%02X%02X", math.round(c.R * 255), math.round(c.G * 255), math.round(c.B * 255))
+		end
+		local row = self:_row(CLOSED, o.Name or "Color")
+		row.ClipsDescendants = true
+		New("TextLabel", {
+			BackgroundTransparency = 1, Position = UDim2.fromOffset(14, 0), Size = UDim2.new(1, -76, 0, CLOSED),
+			Font = FONT.Semi, TextSize = 14, TextColor3 = Theme.Text, TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd, Text = tostring(o.Name or "Color"), Parent = row,
+		})
+		local chip = New("Frame", {
+			AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -14, 0, 13), Size = UDim2.fromOffset(46, 26),
+			BorderSizePixel = 0, Parent = row,
+		}, { Corner(8), Stroke(Theme.Glow, 1, 0.4) })
+		local head = New("TextButton", { Size = UDim2.new(1, 0, 0, CLOSED), BackgroundTransparency = 1, Text = "", Parent = row })
+		Pressable(head, row, Theme.Card, Theme.Hover)
+		local sv = New("Frame", {
+			Position = UDim2.fromOffset(14, 60), Size = UDim2.new(1, -62, 0, 112), BorderSizePixel = 0, Parent = row,
+		}, {
+			Corner(8),
+			New("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 }, {
+				Corner(8), New("UIGradient", { Transparency = NumberSequence.new(0, 1) }),
+			}),
+			New("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0), BorderSizePixel = 0 }, {
+				Corner(8), New("UIGradient", { Rotation = 90, Transparency = NumberSequence.new(1, 0) }),
+			}),
+		})
+		local svCur = New("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(12, 12), BackgroundTransparency = 1,
+			BorderSizePixel = 0, ZIndex = 2, Parent = sv,
+		}, { Corner(0, 1), Stroke(Color3.new(1, 1, 1), 2, 0) })
+		local svHit = New("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", ZIndex = 3, Parent = sv })
+		local hue = New("Frame", {
+			AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -14, 0, 60), Size = UDim2.fromOffset(22, 112),
+			BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, Parent = row,
+		}, {
+			Corner(8),
+			New("UIGradient", { Rotation = 90, Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, Color3.fromHSV(0, 1, 1)),
+				ColorSequenceKeypoint.new(0.167, Color3.fromHSV(0.167, 1, 1)),
+				ColorSequenceKeypoint.new(0.333, Color3.fromHSV(0.333, 1, 1)),
+				ColorSequenceKeypoint.new(0.5, Color3.fromHSV(0.5, 1, 1)),
+				ColorSequenceKeypoint.new(0.667, Color3.fromHSV(0.667, 1, 1)),
+				ColorSequenceKeypoint.new(0.833, Color3.fromHSV(0.833, 1, 1)),
+				ColorSequenceKeypoint.new(1, Color3.fromHSV(0, 1, 1)),
+			}) }),
+		})
+		local hueCur = New("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0), Size = UDim2.new(1, 4, 0, 4),
+			BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, ZIndex = 2, Parent = hue,
+		}, { Corner(2), Stroke(Color3.new(0, 0, 0), 1, 0.3) })
+		local hueHit = New("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", ZIndex = 3, Parent = hue })
+		local box = New("TextBox", {
+			Position = UDim2.fromOffset(14, 180), Size = UDim2.new(1, -28, 0, 30), BackgroundColor3 = Theme.Secondary,
+			BackgroundTransparency = window._fieldT, Font = FONT.Medium, TextSize = 13, TextColor3 = Theme.Text,
+			PlaceholderText = "#RRGGBB", PlaceholderColor3 = Theme.SubText, ClearTextOnFocus = false, Text = "", Parent = row,
+		}, { Corner(9), Pad(12, 0, 12, 0), Stroke(Theme.Glow, 1, 0.65) })
+
+		local obj = {}
+		local function apply(silent)
+			local c = Color3.fromHSV(h, s, v)
+			sv.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
+			svCur.Position = UDim2.fromScale(s, 1 - v)
+			hueCur.Position = UDim2.fromScale(0.5, h)
+			chip.BackgroundColor3 = c
+			if not box:IsFocused() then box.Text = "#" .. hex(c) end
+			window:_flag(o.Flag, hex(c))
+			if not silent then SafeCall(o.Callback, c) end
+		end
+		function obj:Get() return Color3.fromHSV(h, s, v) end
+		function obj:Set(c, silent)
+			if typeof(c) ~= "Color3" then return end
+			h, s, v = c:ToHSV()
+			apply(silent)
+		end
+
+		local function py(pos) return pos.Y + GuiService:GetGuiInset().Y end
+		local function fromSV(pos)
+			local ap, as = sv.AbsolutePosition, sv.AbsoluteSize
+			s = math.clamp((pos.X - ap.X) / math.max(as.X, 1), 0, 1)
+			v = 1 - math.clamp((py(pos) - ap.Y) / math.max(as.Y, 1), 0, 1)
+			apply(false)
+		end
+		local function fromHue(pos)
+			local ap, as = hue.AbsolutePosition, hue.AbsoluteSize
+			h = math.clamp((py(pos) - ap.Y) / math.max(as.Y, 1), 0, 0.999)
+			apply(false)
+		end
+		local dragging, wasScrolling = nil, true
+		local function startDrag(kind, input)
+			dragging, wasScrolling = kind, page.ScrollingEnabled
+			page.ScrollingEnabled = false
+			if kind == "sv" then fromSV(input.Position) else fromHue(input.Position) end
+		end
+		svHit.InputBegan:Connect(function(i) if IsPress(i) then startDrag("sv", i) end end)
+		hueHit.InputBegan:Connect(function(i) if IsPress(i) then startDrag("hue", i) end end)
+		window:_track(UserInputService.InputChanged:Connect(function(i)
+			if dragging and IsMove(i) then
+				if dragging == "sv" then fromSV(i.Position) else fromHue(i.Position) end
+			end
+		end))
+		window:_track(UserInputService.InputEnded:Connect(function(i)
+			if dragging and IsPress(i) then
+				dragging = nil
+				page.ScrollingEnabled = wasScrolling
+			end
+		end))
+		local open = false
+		head.MouseButton1Click:Connect(function()
+			open = not open
+			Tween(row, 0.16, { Size = UDim2.new(1, 0, 0, open and OPEN or CLOSED) })
+		end)
+		box.FocusLost:Connect(function()
+			local t = box.Text:gsub("[#%s]", "")
+			if #t == 6 and tonumber(t, 16) then obj:Set(Color3.fromHex(t)) else apply(true) end
+		end)
+		if o.Flag then
+			window:_registerFlag(o.Flag, function(x) obj:Set(Color3.fromHex(x)) end, function(x)
+				if type(x) ~= "string" then return false, "harus hex" end
+				local t = x:gsub("#", "")
+				if #t ~= 6 or not tonumber(t, 16) then return false, "hex tidak valid" end
+				return true, t
+			end)
+		end
+		obj:Set(typeof(o.Default) == "Color3" and o.Default or Color3.new(1, 1, 1), true)
+		if ShouldFire(o) then task.defer(SafeCall, o.Callback, obj:Get()) end
+		return obj
+	end
+
+	--// ===== Tab bawaan =====
+	function Window:AddSettings(name)
+		local win = self
+		local tab = win:AddTab(name or "Settings")
+		local scaleName, perfName = "Medium", win._perfMode
+		tab:AddSection("Tampilan")
+		tab:AddDropdown({ Name = "Tema", Options = { "Dark Glass", "Redz Blue", "Classic" }, Default = Library.ThemeName,
+			Callback = function(v) if v and v ~= Library.ThemeName then Library:SetTheme(v) end end })
+		local token = 0
+		tab:AddColorPicker({ Name = "Warna aksen", Default = Theme.Blue, FireOnInit = false,
+			Callback = function(c)
+				token += 1
+				local mine = token
+				task.delay(0.15, function() if mine == token then Library:SetAccent(c) end end)
+			end })
+		local pT, cT = win._panelT or Library.PanelTransparency, win._cardT
+		tab:AddSlider({ Name = "Transparansi panel", Min = 0, Max = 0.7, Increment = 0.01, Default = pT, FireOnInit = false,
+			Callback = function(x) pT = x; win:SetTransparency(pT, cT) end })
+		tab:AddSlider({ Name = "Transparansi kartu", Min = 0, Max = 0.8, Increment = 0.01, Default = cT, FireOnInit = false,
+			Callback = function(x) cT = x; win:SetTransparency(pT, cT) end })
+		tab:AddDropdown({ Name = "Ukuran UI", Options = { "Small", "Medium", "Large" }, Default = scaleName,
+			Callback = function(x) if x and x ~= scaleName then scaleName = x; win:SetScale(x) end end })
+		tab:AddDropdown({ Name = "Performa", Options = { "Auto", "High", "Low" }, Default = perfName,
+			Callback = function(x) if x and x ~= perfName then perfName = x; win:SetPerformance(x) end end })
+		tab:AddToggle({ Name = "Cahaya berputar", Default = win._rgbWanted, FireOnInit = false,
+			Callback = function(x) win:SetRGB(x) end })
+		tab:AddKeybind({ Name = "Tombol buka/tutup", Default = win._toggleKey,
+			Changed = function(k) if k ~= Enum.KeyCode.Unknown then win:SetToggleKey(k) end end })
+		tab:AddSection("Config")
+		local cfg = "default"
+		tab:AddInput({ Name = "Nama config", Default = cfg, Placeholder = "default",
+			Callback = function(x) cfg = tostring(x) ~= "" and tostring(x) or "default" end })
+		local function report(ok, msg, okTitle)
+			win:Notify({ Title = ok and okTitle or "Gagal", Content = tostring(msg), Type = ok and "success" or "error" })
+		end
+		tab:AddButton({ Name = "Simpan config", Text = "Simpan", Callback = function()
+			local ok, err = win:SaveConfig(cfg)
+			report(ok, ok and cfg or err, "Config disimpan")
+		end })
+		tab:AddButton({ Name = "Muat config", Text = "Muat", Callback = function()
+			local ok, a = win:LoadConfig(cfg)
+			report(ok, ok and (tostring(a) .. " pengaturan diterapkan") or a, "Config dimuat")
+		end })
+		tab:AddButton({ Name = "Hapus config", Text = "Hapus", Callback = function()
+			win:Confirm({ Title = "Hapus config?", Content = cfg, Yes = "Hapus", Callback = function(yes)
+				if yes then
+					local ok, err = win:DeleteConfig(cfg)
+					report(ok, ok and cfg or err, "Config dihapus")
+				end
+			end })
+		end })
+		tab:AddButton({ Name = "Daftar config", Text = "Lihat", Callback = function()
+			local ok, list = win:GetConfigs()
+			win:Notify({ Title = "Config tersimpan", Duration = 6, Type = ok and "info" or "error",
+				Content = ok and (#list > 0 and table.concat(list, ", ") or "Kosong") or tostring(list) })
+		end })
+		tab:AddSection("Window")
+		tab:AddButton({ Name = "Tutup UI", Text = "Tutup", Callback = function()
+			win:Confirm({ Title = "Tutup UI?", Content = "Window akan dihapus.", Yes = "Tutup", Callback = function(yes)
+				if yes then win:Destroy() end
+			end })
+		end })
+		return tab
+	end
+
+	function Window:AddDiagnostics(name)
+		local win = self
+		local tab = win:AddTab(name or "Diagnostik")
+		tab:AddSection("Sistem")
+		local info = tab:AddParagraph({ Title = "Executor", Content = "-" })
+		local function refresh()
+			local r = Library:CheckCompatibility()
+			info:SetTitle("Executor: " .. r.Executor)
+			info:SetContent(string.format("XevoraUI v%s | FPS: %s\nTidak didukung: %s", r.Version,
+				win.FPS and tostring(math.floor(win.FPS)) or "?",
+				#r.Unsupported > 0 and table.concat(r.Unsupported, ", ") or "-"))
+		end
+		refresh()
+		tab:AddButton({ Name = "Cek ulang", Text = "Cek", Callback = refresh })
+		tab:AddButton({ Name = "Ukur FPS", Text = "Ukur", Callback = function()
+			task.spawn(function()
+				local frames, t0 = 0, os.clock()
+				local conn = RunService.Heartbeat:Connect(function() frames += 1 end)
+				task.wait(1.5)
+				conn:Disconnect()
+				win.FPS = frames / math.max(os.clock() - t0, 0.1)
+				if win.Gui then refresh() end
+			end)
+		end })
+		tab:AddSection("Log")
+		local view = tab:AddParagraph({ Title = "Log terbaru", Content = "(kosong)" })
+		win._logView = view
+		tab:AddButton({ Name = "Salin log", Text = "Salin", Callback = function()
+			local ok = SetClipboard(table.concat(win._log or {}, "\n"))
+			win:Notify({ Title = ok and "Log disalin" or "Clipboard tidak tersedia", Type = ok and "success" or "warn" })
+		end })
+		tab:AddButton({ Name = "Bersihkan log", Text = "Hapus", Callback = function()
+			win._log = {}
+			view:SetContent("(kosong)")
+		end })
+		win:Log("Diagnostik aktif")
+		return tab
+	end
+
+	Library:SetTheme("Dark Glass")
+end
+
 return Library
