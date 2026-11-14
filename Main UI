@@ -4240,4 +4240,439 @@ do
 	Library:SetTheme("Dark Glass")
 end
 
+
+--// XevoraUI Pro Pack | BAGIAN 1/3 | komponen grup dan pilihan
+do
+	local baseRow = Tab._row
+	function Tab:_row(height, searchText)
+		local r = baseRow(self, height, searchText)
+		if self._container then r.Parent = self._container end
+		if self._groupItem then
+			self._groupItem.Text = self._groupItem.Text .. " " .. string.lower(tostring(searchText or ""))
+		end
+		return r
+	end
+
+	function Tab:AddGroup(o)
+		o = o or {}
+		local name = tostring(o.Name or "Group")
+		local open = o.Open ~= false
+		local row = self:_row(0, name .. " " .. tostring(o.Status or ""))
+		local item = self._items[#self._items]
+		row.Size = UDim2.new(1, 0, 0, 0)
+		row.AutomaticSize = Enum.AutomaticSize.Y
+		Pad(8, 0, 8, 8).Parent = row
+		New("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder, Parent = row })
+		local head = New("TextButton", {
+			Size = UDim2.new(1, 0, 0, 46), BackgroundTransparency = 1, Text = "", AutoButtonColor = false,
+			LayoutOrder = 1, Parent = row,
+		})
+		New("TextLabel", {
+			Position = UDim2.fromOffset(4, 10), Size = UDim2.fromOffset(26, 26), BackgroundColor3 = Theme.Blue,
+			BackgroundTransparency = 0.78, Font = FONT.Bold, TextSize = 13, TextColor3 = Theme.Blue,
+			Text = string.upper(string.sub(tostring(o.Icon or name), 1, 1)), Parent = head,
+		}, { Corner(8) })
+		local title = New("TextLabel", {
+			BackgroundTransparency = 1, Position = UDim2.fromOffset(40, 6), Size = UDim2.new(1, -76, 0, 20),
+			Font = FONT.Semi, TextSize = 14, TextColor3 = Theme.Text, TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd, Text = name, Parent = head,
+		})
+		local dot = New("Frame", {
+			Position = UDim2.fromOffset(41, 31), Size = UDim2.fromOffset(6, 6), BackgroundColor3 = Theme.SubText,
+			BorderSizePixel = 0, Parent = head,
+		}, { Corner(0, 1) })
+		local statusLbl = New("TextLabel", {
+			BackgroundTransparency = 1, Position = UDim2.fromOffset(53, 25), Size = UDim2.new(1, -90, 0, 18),
+			Font = FONT.Regular, TextSize = 11, TextColor3 = Theme.SubText, TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd, Text = "", Parent = head,
+		})
+		local arrow = New("TextLabel", {
+			AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 0), Size = UDim2.fromOffset(16, 16),
+			BackgroundTransparency = 1, Font = FONT.Bold, TextSize = 12, TextColor3 = Theme.SubText, Text = "v",
+			Rotation = open and 180 or 0, Parent = head,
+		})
+		local content = New("Frame", {
+			Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+			LayoutOrder = 2, Visible = open, Parent = row,
+		}, {
+			New("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }),
+		})
+
+		local proxy = setmetatable({
+			Window = self.Window, Page = self.Page, Name = self.Name, _items = self._items, _sections = self._sections,
+			_currentSection = self._currentSection, _order = 1, _container = content, _groupItem = item,
+		}, Tab)
+		function proxy:SetStatus(text, color)
+			text = text ~= nil and tostring(text) or ""
+			statusLbl.Text = text
+			local has = text ~= ""
+			statusLbl.Visible, dot.Visible = has, has
+			title.Position = UDim2.fromOffset(40, has and 6 or 13)
+			if typeof(color) == "Color3" then dot.BackgroundColor3 = color end
+		end
+		function proxy:SetOpen(v)
+			open = v and true or false
+			content.Visible = open
+			Tween(arrow, 0.15, { Rotation = open and 180 or 0 })
+		end
+		proxy:SetStatus(o.Status, o.StatusColor)
+		head.MouseButton1Click:Connect(function() proxy:SetOpen(not open) end)
+		return proxy
+	end
+
+	function Tab:AddChipGrid(o)
+		o = o or {}
+		local win = self.Window
+		local multi = o.Multi == true
+		local cols = math.clamp(math.floor(tonumber(o.Columns) or 3), 1, 6)
+		local CH = 32
+		local options = {}
+		for _, v in ipairs(o.Options or {}) do table.insert(options, tostring(v)) end
+		local rowsN = math.max(1, math.ceil(#options / cols))
+		local row = self:_row(34 + rowsN * (CH + 6) + 4, tostring(o.Name or "") .. " " .. table.concat(options, " "))
+		New("TextLabel", {
+			BackgroundTransparency = 1, Position = UDim2.fromOffset(14, 6), Size = UDim2.new(1, -28, 0, 22),
+			Font = FONT.Semi, TextSize = 14, TextColor3 = Theme.Text, TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd, Text = tostring(o.Name or "Select"), Parent = row,
+		})
+		local grid = New("Frame", {
+			Position = UDim2.fromOffset(10, 34), Size = UDim2.new(1, -20, 0, rowsN * (CH + 6)),
+			BackgroundTransparency = 1, Parent = row,
+		}, {
+			New("UIGridLayout", {
+				CellSize = UDim2.new(1 / cols, -(6 * (cols - 1) / cols), 0, CH), CellPadding = UDim2.fromOffset(6, 6),
+				SortOrder = Enum.SortOrder.LayoutOrder,
+			}),
+		})
+		local selected, single, chips = {}, nil, {}
+		local function value()
+			if multi then
+				local out = {}
+				for _, opt in ipairs(options) do if selected[opt] then table.insert(out, opt) end end
+				return out
+			end
+			return single
+		end
+		local function paint()
+			for opt, b in pairs(chips) do
+				local on = multi and selected[opt] == true or (not multi and single == opt)
+				b.BackgroundColor3 = on and Theme.Blue or Theme.Secondary
+				b.BackgroundTransparency = on and 0.1 or win._fieldT
+				b.TextColor3 = on and Theme.Background or Theme.Text
+			end
+		end
+		for i, opt in ipairs(options) do
+			local b = New("TextButton", {
+				BackgroundColor3 = Theme.Secondary, BackgroundTransparency = win._fieldT, AutoButtonColor = false,
+				Font = FONT.Medium, TextSize = 12, TextColor3 = Theme.Text, TextTruncate = Enum.TextTruncate.AtEnd,
+				Text = opt, LayoutOrder = i, Parent = grid,
+			}, { Corner(8), Stroke(Theme.Glow, 1, 0.7) })
+			chips[opt] = b
+			b.MouseButton1Click:Connect(function()
+				if multi then selected[opt] = (not selected[opt]) or nil else single = opt end
+				paint()
+				win:_flag(o.Flag, value())
+				SafeCall(o.Callback, value())
+			end)
+		end
+		local obj = {}
+		function obj:Get() return value() end
+		function obj:Set(v, silent)
+			selected, single = {}, nil
+			if multi then
+				for _, k in ipairs(type(v) == "table" and v or {}) do
+					if table.find(options, tostring(k)) then selected[tostring(k)] = true end
+				end
+			elseif v ~= nil and table.find(options, tostring(v)) then
+				single = tostring(v)
+			end
+			paint()
+			win:_flag(o.Flag, value())
+			if not silent then SafeCall(o.Callback, value()) end
+		end
+		if o.Flag then
+			win:_registerFlag(o.Flag, function(v) obj:Set(v) end, function(v)
+				if multi then
+					if type(v) ~= "table" then return false, "harus daftar" end
+					return true, v
+				end
+				if type(v) ~= "string" or not table.find(options, v) then return false, "pilihan tidak ada" end
+				return true, v
+			end)
+		end
+		if o.Default ~= nil then
+			obj:Set(o.Default, true)
+			if o.FireOnInit == true then task.defer(SafeCall, o.Callback, value()) end
+		else
+			paint()
+			win:_flag(o.Flag, value())
+		end
+		return obj
+	end
+end
+
+--// XevoraUI Pro Pack | BAGIAN 2/3 | kartu modul, statistik, dan konsol
+do
+	function Tab:AddModule(o)
+		o = o or {}
+		local win = self.Window
+		local hasDesc = o.Desc ~= nil and o.Desc ~= ""
+		local configurable = typeof(o.OnConfigure) == "function"
+		local pad = configurable and 112 or 76
+		local row = self:_row(hasDesc and 68 or 54, tostring(o.Name or "") .. " " .. tostring(o.Desc or ""))
+		local bar = New("Frame", {
+			Position = UDim2.fromOffset(0, 10), Size = UDim2.new(0, 3, 1, -20), BackgroundColor3 = Theme.Blue,
+			BorderSizePixel = 0, Visible = false, Parent = row,
+		}, { Corner(2) })
+		New("TextLabel", {
+			BackgroundTransparency = 1, Position = UDim2.fromOffset(14, 8), Size = UDim2.new(1, -pad, 0, 20),
+			Font = FONT.Semi, TextSize = 14, TextColor3 = Theme.Text, TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd, Text = tostring(o.Name or "Module"), Parent = row,
+		})
+		local status = New("TextLabel", {
+			BackgroundTransparency = 1, Position = UDim2.fromOffset(14, 28), Size = UDim2.new(1, -pad, 0, 14),
+			Font = FONT.Bold, TextSize = 10, TextColor3 = Theme.SubText, TextXAlignment = Enum.TextXAlignment.Left,
+			Text = "INACTIVE", Parent = row,
+		})
+		if hasDesc then
+			New("TextLabel", {
+				BackgroundTransparency = 1, Position = UDim2.fromOffset(14, 45), Size = UDim2.new(1, -pad, 0, 16),
+				Font = FONT.Regular, TextSize = 11, TextColor3 = Theme.SubText, TextXAlignment = Enum.TextXAlignment.Left,
+				TextTruncate = Enum.TextTruncate.AtEnd, Text = tostring(o.Desc), Parent = row,
+			})
+		end
+		local switch = New("Frame", {
+			AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -14, 0.5, 0), Size = UDim2.fromOffset(46, 26),
+			BackgroundColor3 = Theme.Off, BorderSizePixel = 0, Parent = row,
+		}, { Corner(0, 1) })
+		local knob = New("Frame", {
+			Position = UDim2.fromOffset(3, 3), Size = UDim2.fromOffset(20, 20), BackgroundColor3 = Theme.Soft,
+			BorderSizePixel = 0, Parent = switch,
+		}, { Corner(0, 1) })
+		local btn = New("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", Parent = row })
+		Pressable(btn, row, Theme.Card, Theme.Hover)
+		if configurable then
+			local cfg = New("TextButton", {
+				AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -68, 0.5, 0), Size = UDim2.fromOffset(28, 28),
+				BackgroundTransparency = 1, Font = FONT.Bold, TextSize = 18, TextColor3 = Theme.SubText, Text = ">",
+				Parent = row,
+			})
+			cfg.MouseButton1Click:Connect(function() SafeCall(o.OnConfigure) end)
+		end
+		local value = o.Default == true
+		local function render(animate)
+			bar.Visible = value
+			status.Text = value and "ACTIVE" or "INACTIVE"
+			status.TextColor3 = value and Theme.Blue or Theme.SubText
+			local pos = value and UDim2.fromOffset(23, 3) or UDim2.fromOffset(3, 3)
+			local col = value and Theme.Blue or Theme.Off
+			if animate then
+				Tween(knob, 0.18, { Position = pos }, Enum.EasingStyle.Back)
+				Tween(switch, 0.16, { BackgroundColor3 = col })
+			else
+				knob.Position = pos
+				switch.BackgroundColor3 = col
+			end
+		end
+		local obj = {}
+		function obj:Get() return value end
+		function obj:Set(v, silent)
+			value = v and true or false
+			render(true)
+			win:_flag(o.Flag, value)
+			if not silent then SafeCall(o.Callback, value) end
+		end
+		btn.MouseButton1Click:Connect(function() obj:Set(not value) end)
+		render(false)
+		win:_flag(o.Flag, value)
+		if o.Flag then
+			win:_registerFlag(o.Flag, function(v) obj:Set(v) end, function(v)
+				if type(v) ~= "boolean" then return false, "harus boolean" end
+				return true, v
+			end)
+		end
+		if value and o.FireOnInit ~= false then task.defer(SafeCall, o.Callback, value) end
+		return obj
+	end
+
+	function Tab:AddStats(list)
+		list = type(list) == "table" and list or {}
+		local n = math.max(#list, 1)
+		local names = {}
+		for _, it in ipairs(list) do table.insert(names, tostring(it.Label or "")) end
+		local row = self:_row(66, "stats " .. table.concat(names, " "))
+		local values = {}
+		for i, it in ipairs(list) do
+			local cell = New("Frame", {
+				Position = UDim2.new((i - 1) / n, 0, 0, 0), Size = UDim2.new(1 / n, 0, 1, 0),
+				BackgroundTransparency = 1, Parent = row,
+			})
+			values[i] = New("TextLabel", {
+				BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 10), Size = UDim2.new(1, 0, 0, 26),
+				Font = FONT.Bold, TextSize = 19, TextColor3 = i == 1 and Theme.Blue or Theme.Text,
+				TextTruncate = Enum.TextTruncate.AtEnd, Text = tostring(it.Value or "-"), Parent = cell,
+			})
+			New("TextLabel", {
+				BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 38), Size = UDim2.new(1, 0, 0, 16),
+				Font = FONT.Regular, TextSize = 11, TextColor3 = Theme.SubText, Text = names[i], Parent = cell,
+			})
+			if i > 1 then
+				New("Frame", {
+					Position = UDim2.new((i - 1) / n, 0, 0.2, 0), Size = UDim2.new(0, 1, 0.6, 0),
+					BackgroundColor3 = Theme.Border, BorderSizePixel = 0, Parent = row,
+				})
+			end
+		end
+		local obj = {}
+		function obj:Set(i, v) if values[i] then values[i].Text = tostring(v) end end
+		return obj
+	end
+
+	function Tab:AddConsole(o)
+		o = o or {}
+		local win = self.Window
+		local H = math.clamp(tonumber(o.Height) or 160, 80, 400)
+		local row = self:_row(H + 50, tostring(o.Name or "Console"))
+		New("TextLabel", {
+			BackgroundTransparency = 1, Position = UDim2.fromOffset(14, 0), Size = UDim2.new(1, -110, 0, 38),
+			Font = FONT.Semi, TextSize = 14, TextColor3 = Theme.Text, TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd, Text = tostring(o.Name or "Console"), Parent = row,
+		})
+		local copy = New("TextButton", {
+			AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -10, 0, 6), Size = UDim2.fromOffset(86, 26),
+			BackgroundColor3 = Theme.Blue, AutoButtonColor = false, Font = FONT.Semi, TextSize = 12,
+			TextColor3 = Theme.Background, Text = "Copy", Parent = row,
+		}, { Corner(8) })
+		local box = New("ScrollingFrame", {
+			Position = UDim2.fromOffset(10, 40), Size = UDim2.new(1, -20, 0, H), BackgroundColor3 = Theme.Background,
+			BackgroundTransparency = 0.2, BorderSizePixel = 0, ScrollBarThickness = 3, ScrollBarImageColor3 = Theme.Blue,
+			CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, Parent = row,
+		}, {
+			Corner(8), Pad(8, 6, 8, 6),
+			New("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder }),
+		})
+		local lines, nodes, seq = {}, {}, 0
+		local function colorFor(level)
+			if level == "ok" then return Color3.fromHex("#5BD99A") end
+			if level == "warn" then return Color3.fromHex("#F2C94C") end
+			if level == "error" then return Theme.Red end
+			return Theme.Text
+		end
+		local obj = {}
+		function obj:Add(text, level)
+			text = tostring(text)
+			seq += 1
+			table.insert(lines, text)
+			table.insert(nodes, New("TextLabel", {
+				Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+				Font = Enum.Font.Code, TextSize = 12, TextColor3 = colorFor(level), TextXAlignment = Enum.TextXAlignment.Left,
+				TextWrapped = true, Text = text, LayoutOrder = seq, Parent = box,
+			}))
+			if #nodes > 200 then
+				table.remove(lines, 1)
+				table.remove(nodes, 1):Destroy()
+			end
+			task.defer(function() if box.Parent then box.CanvasPosition = Vector2.new(0, 100000) end end)
+		end
+		function obj:Clear()
+			for _, n in ipairs(nodes) do n:Destroy() end
+			lines, nodes = {}, {}
+		end
+		function obj:Get() return table.concat(lines, "\n") end
+		copy.MouseButton1Click:Connect(function()
+			local ok = SetClipboard(obj:Get())
+			win:Notify({ Title = ok and "Konsol disalin" or "Clipboard tidak tersedia", Type = ok and "success" or "warn" })
+		end)
+		return obj
+	end
+end
+
+--// XevoraUI Pro Pack | BAGIAN 3/3 | Rail responsif
+do
+	local baseLayout = Window._layout
+
+	function Window:_railTab(t, vertical)
+		if vertical then
+			t._badge.Visible = true
+			t._badge.AnchorPoint = Vector2.new(0.5, 0)
+			t._badge.Position = UDim2.new(0.5, 0, 0, 7)
+			if not t._icon then t._badgeLbl.Text = string.upper(string.sub(t.Name, 1, 1)) end
+			t._label.Position = UDim2.fromOffset(0, 36)
+			t._label.Size = UDim2.new(1, 0, 0, 16)
+			t._label.TextSize = 10
+			t._label.TextXAlignment = Enum.TextXAlignment.Center
+		else
+			t._badge.Visible = t._icon ~= nil
+			t._badge.AnchorPoint = Vector2.new(0, 0.5)
+			t._badge.Position = UDim2.new(0, 12, 0.5, 0)
+			t._badgeLbl.Text = ""
+			t._label.Position = UDim2.fromOffset(t._icon and 48 or 16, 0)
+			t._label.Size = UDim2.new(1, t._icon and -54 or -22, 1, 0)
+			t._label.TextSize = 14
+			t._label.TextXAlignment = Enum.TextXAlignment.Left
+		end
+	end
+
+	function Window:_layout()
+		baseLayout(self)
+		local vertical = self._rail == true and not self._mobileLayout
+		if self._railVertical ~= vertical then
+			self._railVertical = vertical
+			for _, t in ipairs(self._tabs) do self:_railTab(t, vertical) end
+		end
+		if not vertical then return end
+		local RW = 76
+		self._sidebar.Size = UDim2.new(0, RW, 1, -77)
+		self._content.Position = UDim2.fromOffset(RW + 20, 67)
+		self._content.Size = UDim2.new(1, -(RW + 30), 1, -77)
+		self._searchBox.Visible = false
+		self._profile.Visible = false
+		self._tabList.Position = UDim2.fromOffset(0, 10)
+		self._tabList.Size = UDim2.new(1, 0, 1, -20)
+		for _, t in ipairs(self._tabs) do t.Button.Size = UDim2.new(1, 0, 0, 58) end
+	end
+
+	function Window:SetRail(on)
+		self._rail = on and true or false
+		self._railVertical = nil
+		self:_layout()
+	end
+
+	local baseAddTab = Window.AddTab
+	function Window:AddTab(opts)
+		local t = baseAddTab(self, opts)
+		if self._rail then
+			self._railVertical = nil
+			self:_layout()
+		end
+		return t
+	end
+
+	local prevCreate = Library.CreateWindow
+	function Library:CreateWindow(opts)
+		local win = prevCreate(self, opts)
+		if win and type(opts) == "table" and opts.Rail then win:SetRail(true) end
+		return win
+	end
+end
+
+--// XevoraUI Pro Pack | BAGIAN 4 | section dan divider tetap di dalam grup
+do
+	local baseSection = Tab.AddSection
+	function Tab:AddSection(name)
+		baseSection(self, name)
+		if self._container then
+			local sec = self._sections[#self._sections]
+			if sec and sec.Frame then sec.Frame.Parent = self._container end
+		end
+	end
+
+	local baseDivider = Tab.AddDivider
+	function Tab:AddDivider()
+		local line = baseDivider(self)
+		if self._container and line then line.Parent = self._container end
+		return line
+	end
+end
+
 return Library
