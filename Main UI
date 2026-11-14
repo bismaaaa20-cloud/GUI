@@ -48,21 +48,21 @@ local Library = { Version = "3.9.0", Windows = {} }
 --// ===== 1. Theme & konfigurasi =====
 
 local Theme = {
-	Background = Color3.fromHex("#0A0F1B"),
-	Panel = Color3.fromHex("#0E1422"),
-	Card = Color3.fromHex("#141B2E"),
-	Secondary = Color3.fromHex("#1A2338"),
-	Hover = Color3.fromHex("#212C47"),
-	Off = Color3.fromHex("#2B3550"),
-	Border = Color3.fromHex("#263150"),
-	Glow = Color3.fromHex("#5A78D2"),
-	Blue = Color3.fromHex("#5685FF"),
+	Background = Color3.fromHex("#000000"),
+	Panel = Color3.fromHex("#050505"),
+	Card = Color3.fromHex("#0B0B0B"),
+	Secondary = Color3.fromHex("#141414"),
+	Hover = Color3.fromHex("#1E1E1E"),
+	Off = Color3.fromHex("#2A2A2A"),
+	Border = Color3.fromHex("#2E2E2E"),
+	Glow = Color3.fromHex("#8C8C8C"),
+	Blue = Color3.fromHex("#E2B33A"), -- aksen emas; ganti #5685FF untuk gaya redz
 	Purple = Color3.fromHex("#9B6BFF"),
 	Red = Color3.fromHex("#FF526D"),
-	Soft = Color3.fromHex("#DCE6FF"), -- pengganti putih murni untuk kontrol interaktif
-	Cyan = Color3.fromHex("#8FB8FF"),
-	Text = Color3.fromHex("#F2F5FF"),
-	SubText = Color3.fromHex("#98A4C4"),
+	Soft = Color3.fromHex("#EDEDED"),
+	Cyan = Color3.fromHex("#F2D27A"),
+	Text = Color3.fromHex("#F5F5F5"),
+	SubText = Color3.fromHex("#A0A0A0"),
 }
 Library.Theme = Theme -- ubah sebelum CreateWindow kalau mau ganti warna
 
@@ -74,13 +74,14 @@ Library.IconSize = 60 -- diameter tombol logo bulat (piksel)
 Library.IconZoom = 1.25 -- pembesaran gambar di dalam lingkaran
 
 -- Transparansi: 0 = padat. Default dibuat solid (~94%) supaya tulisan tidak terganggu objek game.
-Library.PanelTransparency = 0.06
-Library.CardTransparency = 0.1
-Library.FieldTransparency = 0.18
+Library.PanelTransparency = 0.38
+Library.CardTransparency = 0.45
+Library.FieldTransparency = 0.5
+Library.ToggleStyle = "Checkbox" -- "Checkbox" (Banana Cat) atau "Switch" (redz)
 
 -- Aksen kontrol (toggle, slider, indikator) = biru polos. Hanya tepi panel & logo yang punya
 -- cahaya merah-putih berputar (lewat TweenService; mati otomatis di mode hemat).
-Library.Performance = "Auto" -- Auto mulai ringan lalu mengaktifkan efek jika FPS stabil; High / Low
+Library.Performance = "High" -- High mempertahankan garis tepi dan efek penuh; Auto / Low tersedia
 
 local WIN_H = 360 -- tinggi dasar desktop
 local MOBILE_H = 460 -- ruang konten ekstra untuk layout HP portrait
@@ -1745,21 +1746,37 @@ end
 
 function Tab:AddSection(name)
 	local holder = New("Frame", {
-		Size = UDim2.new(1, 0, 0, 26),
+		Size = UDim2.new(1, 0, 0, 34),
 		BackgroundTransparency = 1,
 		LayoutOrder = self._order,
 		Parent = self.Page,
 	})
 	New("TextLabel", {
 		BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(2, 2),
-		Size = UDim2.new(1, -2, 1, 0),
+		Size = UDim2.new(1, 0, 0, 24),
 		Font = FONT.Bold,
 		TextSize = 15,
-		TextColor3 = Theme.Text,
-		TextXAlignment = Enum.TextXAlignment.Left,
+		TextColor3 = Theme.Blue,
+		TextXAlignment = Enum.TextXAlignment.Center,
 		Text = tostring(name),
 		Parent = holder,
+	})
+	New("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 27),
+		Size = UDim2.new(0.9, 0, 0, 1),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		BorderSizePixel = 0,
+		Parent = holder,
+	}, {
+		New("UIGradient", {
+			Color = ColorSequence.new(Theme.Blue, Theme.Cyan),
+			Transparency = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, 1),
+				NumberSequenceKeypoint.new(0.5, 0),
+				NumberSequenceKeypoint.new(1, 1),
+			}),
+		}),
 	})
 	self._order += 1
 	local sec = { Frame = holder, Text = string.lower(tostring(name)) }
@@ -1850,25 +1867,46 @@ end
 function Tab:AddToggle(o)
 	o = o or {}
 	local window = self.Window
+	local checkbox = (o.Style or Library.ToggleStyle) == "Checkbox"
 	local hasDesc = o.Desc ~= nil and o.Desc ~= ""
 	local row = self:_row(hasDesc and 56 or 48, tostring(o.Name or "") .. " " .. tostring(o.Desc or ""))
-	self:_title(row, o.Name or "Toggle", hasDesc and o.Desc or nil, -76)
-
-	local switch = New("Frame", {
-		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -14, 0.5, 0),
-		Size = UDim2.fromOffset(46, 26),
-		BackgroundColor3 = Theme.Off,
-		BorderSizePixel = 0,
-		Parent = row,
-	}, { Corner(0, 1) })
-	local knob = New("Frame", {
-		Position = UDim2.fromOffset(3, 3),
-		Size = UDim2.fromOffset(20, 20),
-		BackgroundColor3 = Theme.Soft,
-		BorderSizePixel = 0,
-		Parent = switch,
-	}, { Corner(0, 1) })
+	self:_title(row, o.Name or "Toggle", hasDesc and o.Desc or nil, checkbox and -52 or -76)
+	local switch, knob
+	if checkbox then
+		switch = New("Frame", {
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -14, 0.5, 0),
+			Size = UDim2.fromOffset(24, 24),
+			BackgroundTransparency = 1,
+			BorderSizePixel = 0,
+			Parent = row,
+		}, { Corner(6), Stroke(Theme.Blue, 2, 0) })
+		knob = New("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromOffset(12, 12),
+			BackgroundColor3 = Theme.Blue,
+			BackgroundTransparency = 1,
+			BorderSizePixel = 0,
+			Parent = switch,
+		}, { Corner(3) })
+	else
+		switch = New("Frame", {
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -14, 0.5, 0),
+			Size = UDim2.fromOffset(46, 26),
+			BackgroundColor3 = Theme.Off,
+			BorderSizePixel = 0,
+			Parent = row,
+		}, { Corner(0, 1) })
+		knob = New("Frame", {
+			Position = UDim2.fromOffset(3, 3),
+			Size = UDim2.fromOffset(20, 20),
+			BackgroundColor3 = Theme.Soft,
+			BorderSizePixel = 0,
+			Parent = switch,
+		}, { Corner(0, 1) })
+	end
 	local btn = New("TextButton", {
 		Size = UDim2.fromScale(1, 1),
 		BackgroundTransparency = 1,
@@ -1876,9 +1914,17 @@ function Tab:AddToggle(o)
 		Parent = row,
 	})
 	Pressable(btn, row, Theme.Card, Theme.Hover)
-
 	local value = o.Default == true
 	local function render(animate)
+		if checkbox then
+			local t = value and 0 or 1
+			if animate then
+				Tween(knob, 0.14, { BackgroundTransparency = t })
+			else
+				knob.BackgroundTransparency = t
+			end
+			return
+		end
 		local pos = value and UDim2.fromOffset(23, 3) or UDim2.fromOffset(3, 3)
 		local col = value and Theme.Blue or Theme.Off
 		if animate then
@@ -1889,7 +1935,6 @@ function Tab:AddToggle(o)
 			switch.BackgroundColor3 = col
 		end
 	end
-
 	local obj = {}
 	function obj:Set(v, silent)
 		value = v and true or false
@@ -1902,11 +1947,9 @@ function Tab:AddToggle(o)
 	function obj:Get()
 		return value
 	end
-
 	btn.MouseButton1Click:Connect(function()
 		obj:Set(not value)
 	end)
-
 	render(false)
 	window:_flag(o.Flag, value)
 	if o.Flag then
