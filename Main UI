@@ -4240,8 +4240,9 @@ do
 	Library:SetTheme("Dark Glass")
 end
 
-
---// XevoraUI Pro Pack | BAGIAN 1/3 | komponen grup dan pilihan
+--// ===== MULAI P0 (dasar: Group, ChipGrid, Module, Stats, Console) =====
+if not Library._p0 then
+Library._p0 = true
 do
 	local baseRow = Tab._row
 	function Tab:_row(height, searchText)
@@ -4294,9 +4295,7 @@ do
 		local content = New("Frame", {
 			Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
 			LayoutOrder = 2, Visible = open, Parent = row,
-		}, {
-			New("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }),
-		})
+		}, { New("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }) })
 
 		local proxy = setmetatable({
 			Window = self.Window, Page = self.Page, Name = self.Name, _items = self._items, _sections = self._sections,
@@ -4409,10 +4408,7 @@ do
 		end
 		return obj
 	end
-end
 
---// XevoraUI Pro Pack | BAGIAN 2/3 | kartu modul, statistik, dan konsol
-do
 	function Tab:AddModule(o)
 		o = o or {}
 		local win = self.Window
@@ -4585,14 +4581,374 @@ do
 		end)
 		return obj
 	end
+
+	local baseSection = Tab.AddSection
+	function Tab:AddSection(name)
+		baseSection(self, name)
+		if self._container then
+			local sec = self._sections[#self._sections]
+			if sec and sec.Frame then sec.Frame.Parent = self._container end
+		end
+	end
+
+	local baseDivider = Tab.AddDivider
+	if baseDivider then
+		function Tab:AddDivider()
+			local line = baseDivider(self)
+			if self._container and line then line.Parent = self._container end
+			return line
+		end
+	end
 end
+end
+--// ===== SELESAI P0 =====
 
---// XevoraUI Pro Pack | BAGIAN 3/3 | Rail responsif
+--// ===== MULAI P1 (inti: Ticker, Registry, Bahasa, Storage, Ikon) =====
 do
-	local baseLayout = Window._layout
+	local function copy(t)
+		local o = {}
+		for k, v in pairs(t) do o[k] = v end
+		return o
+	end
 
-	function Window:_railTab(t, vertical)
-		if vertical then
+	--// Ticker
+	function Window:Every(sec, fn, always)
+		local list = self._tasks
+		if not list then
+			list = {}
+			self._tasks = list
+			self:_track(RunService.Heartbeat:Connect(function(dt)
+				for i = #list, 1, -1 do
+					local t = list[i]
+					if t.dead then
+						table.remove(list, i)
+					elseif self._visible or t.always then
+						t.acc += dt
+						if t.acc >= (self._low and t.sec * 2 or t.sec) then
+							t.acc = 0
+							SafeCall(t.fn)
+						end
+					end
+				end
+			end))
+		end
+		local t = { sec = sec, fn = fn, always = always, acc = 0 }
+		table.insert(list, t)
+		return function() t.dead = true end
+	end
+
+	--// Registry
+	function Window:_regAdd(key, e)
+		self._reg, self._regList = self._reg or {}, self._regList or {}
+		local base, n = key, 1
+		while self._reg[key] do
+			n += 1
+			key = base .. "#" .. n
+		end
+		e.Key = key
+		self._reg[key] = e
+		table.insert(self._regList, e)
+		return e
+	end
+	function Window:Find(key) return self._reg and self._reg[key] end
+	function Window:Each(fn)
+		for _, e in ipairs(self._regList or {}) do fn(e) end
+	end
+
+	function Library:_decorate(name, kind)
+		local base = Tab[name]
+		if type(base) ~= "function" or (Library._dec and Library._dec[name]) then return end
+		Library._dec = Library._dec or {}
+		Library._dec[name] = true
+		Tab[name] = function(self, o, ...)
+			local n = #self._items
+			local obj = base(self, o, ...)
+			if type(o) ~= "table" then o = {} end
+			local item = self._items[n + 1]
+			local def
+			if type(obj) == "table" and obj.Get then
+				local ok, v = pcall(obj.Get, obj)
+				if ok then def = v end
+			end
+			local e = self.Window:_regAdd(o.Flag or (self.Name .. "/" .. tostring(o.Name or kind)), {
+				Kind = kind, Name = tostring(o.Name or kind), Tab = self, Item = item, Obj = obj, Flag = o.Flag, Default = def, Tip = o.Tip,
+			})
+			if item then item.Key = e.Key end
+			return obj
+		end
+	end
+	for name, kind in pairs({ AddToggle = "toggle", AddSlider = "slider", AddDropdown = "dropdown", AddInput = "input", AddKeybind = "keybind", AddButton = "button", AddColorPicker = "color", AddChipGrid = "chips", AddModule = "module" }) do
+		Library:_decorate(name, kind)
+	end
+
+	--// Bahasa
+	Library.Lang = Library.Lang or "id"
+	Library.Strings = { id = {}, en = {} }
+	function Library:AddStrings(lang, t)
+		for k, v in pairs(t) do self.Strings[lang][k] = v end
+	end
+	function Library:T(k, ...)
+		local s = (self.Strings[self.Lang] and self.Strings[self.Lang][k]) or self.Strings.id[k] or k
+		if select("#", ...) > 0 then
+			local ok, r = pcall(string.format, s, ...)
+			if ok then return r end
+		end
+		return s
+	end
+	Library:AddStrings("id", { lang = "Bahasa (mulai ulang UI)", langSec = "Bahasa" })
+	Library:AddStrings("en", { lang = "Language (restart UI)", langSec = "Language" })
+
+	--// Storage
+	local function canFS()
+		return typeof(readfile) == "function" and typeof(writefile) == "function" and typeof(isfile) == "function"
+	end
+	function Window:_uiPath() return self._folder .. "_ui.json" end
+	function Window:_loadUI()
+		self._ui = {}
+		if not canFS() then return end
+		local ok, data = pcall(function()
+			local p = self:_uiPath()
+			if isfile(p) then return HttpService:JSONDecode(readfile(p)) end
+		end)
+		if ok and type(data) == "table" then self._ui = data end
+	end
+	function Window:_store(k, v)
+		self._ui = self._ui or {}
+		self._ui[k] = v
+		self._uiDirty = true
+	end
+	function Window:_load(k, d)
+		local v = self._ui and self._ui[k]
+		if v == nil then return d end
+		return v
+	end
+	function Window:_flushUI()
+		if not self._uiDirty or not canFS() then return end
+		self._uiDirty = false
+		pcall(function()
+			local dir = self._folder:match("^(.*)/[^/]*$")
+			if dir and typeof(isfolder) == "function" and typeof(makefolder) == "function" and not isfolder(dir) then makefolder(dir) end
+			writefile(self:_uiPath(), HttpService:JSONEncode(self._ui))
+		end)
+	end
+
+	--// Paket ikon
+	local function build(fn, parent, size, color)
+		local f = New("Frame", { Size = UDim2.fromOffset(size, size), BackgroundTransparency = 1, Parent = parent })
+		local th = 0.1
+		local px = math.max(1, size * th)		local function L(x1, y1, x2, y2)
+			local dx, dy = x2 - x1, y2 - y1
+			New("Frame", {
+				AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale((x1 + x2) / 2, (y1 + y2) / 2),
+				Size = UDim2.fromScale(math.sqrt(dx * dx + dy * dy) + th * 0.6, th), BackgroundColor3 = color,
+				BorderSizePixel = 0, Rotation = math.deg(math.atan2(dy, dx)), Parent = f,
+			}, { Corner(0, 0.5) })
+		end
+		local function P(...)
+			local p = { ... }
+			for i = 1, #p - 3, 2 do L(p[i], p[i + 1], p[i + 2], p[i + 3]) end
+		end
+		local function O(x, y, w, h, r)
+			New("Frame", {
+				AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(x, y), Size = UDim2.fromScale(w, h),
+				BackgroundTransparency = 1, BorderSizePixel = 0, Parent = f,
+			}, { Corner(0, r), Stroke(color, px, 0) })
+		end
+		local c = {
+			L = L, P = P,
+			C = function(x, y, w, h) O(x, y, w, h, 0.5) end,
+			R = function(x, y, w, h) O(x, y, w, h, 0.15) end,
+			D = function(x, y, d)
+				New("Frame", {
+					AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(x, y), Size = UDim2.fromScale(d, d),
+					BackgroundColor3 = color, BorderSizePixel = 0, Parent = f,
+				}, { Corner(0, 0.5) })
+			end,
+		}
+		fn(c)
+		return f
+	end
+	Library.Icons = {
+		home = function(c) c.P(0.1, 0.5, 0.5, 0.12, 0.9, 0.5) c.R(0.5, 0.7, 0.56, 0.38) end,
+		gear = function(c)
+			c.C(0.5, 0.5, 0.52, 0.52) c.D(0.5, 0.5, 0.14)
+			for i = 0, 7 do
+				local a = math.rad(i * 45)
+				c.L(0.5 + 0.3 * math.cos(a), 0.5 + 0.3 * math.sin(a), 0.5 + 0.44 * math.cos(a), 0.5 + 0.44 * math.sin(a))
+			end
+		end,
+		eye = function(c) c.C(0.5, 0.5, 0.9, 0.5) c.D(0.5, 0.5, 0.24) end,
+		crown = function(c) c.P(0.12, 0.7, 0.12, 0.3, 0.32, 0.52, 0.5, 0.2, 0.68, 0.52, 0.88, 0.3, 0.88, 0.7, 0.12, 0.7) end,
+		bolt = function(c) c.P(0.58, 0.08, 0.26, 0.56, 0.5, 0.56, 0.42, 0.92, 0.76, 0.42, 0.52, 0.42, 0.58, 0.08) end,
+		bell = function(c) c.C(0.5, 0.4, 0.52, 0.52) c.L(0.18, 0.72, 0.82, 0.72) c.D(0.5, 0.86, 0.12) end,
+		star = function(c)
+			local p = {}
+			for _, k in ipairs({ 0, 2, 4, 1, 3, 0 }) do
+				local a = math.rad(-90 + 72 * k)
+				table.insert(p, 0.5 + 0.46 * math.cos(a))
+				table.insert(p, 0.54 + 0.46 * math.sin(a))
+			end
+			c.P(table.unpack(p))
+		end,
+		pin = function(c) c.C(0.5, 0.3, 0.4, 0.4) c.L(0.5, 0.5, 0.5, 0.92) end,
+		search = function(c) c.C(0.42, 0.42, 0.52, 0.52) c.L(0.6, 0.6, 0.9, 0.9) end,
+		folder = function(c) c.R(0.5, 0.58, 0.8, 0.5) c.L(0.1, 0.28, 0.4, 0.28) end,
+		user = function(c) c.C(0.5, 0.28, 0.32, 0.32) c.C(0.5, 0.78, 0.7, 0.4) end,
+		play = function(c) c.P(0.3, 0.15, 0.3, 0.85, 0.85, 0.5, 0.3, 0.15) end,
+		download = function(c) c.L(0.5, 0.1, 0.5, 0.62) c.P(0.28, 0.42, 0.5, 0.66, 0.72, 0.42) c.L(0.15, 0.88, 0.85, 0.88) end,
+		lock = function(c) c.R(0.5, 0.65, 0.62, 0.45) c.C(0.5, 0.32, 0.36, 0.4) end,
+		chevron = function(c) c.P(0.25, 0.38, 0.5, 0.64, 0.75, 0.38) end,
+		close = function(c) c.L(0.2, 0.2, 0.8, 0.8) c.L(0.8, 0.2, 0.2, 0.8) end,
+		plus = function(c) c.L(0.5, 0.15, 0.5, 0.85) c.L(0.15, 0.5, 0.85, 0.5) end,
+		list = function(c) c.L(0.15, 0.25, 0.85, 0.25) c.L(0.15, 0.5, 0.85, 0.5) c.L(0.15, 0.75, 0.85, 0.75) end,
+		grid = function(c) c.R(0.3, 0.3, 0.3, 0.3) c.R(0.7, 0.3, 0.3, 0.3) c.R(0.3, 0.7, 0.3, 0.3) c.R(0.7, 0.7, 0.3, 0.3) end,
+		undo = function(c) c.P(0.78, 0.72, 0.78, 0.45, 0.34, 0.45) c.P(0.5, 0.28, 0.3, 0.45, 0.5, 0.62) end,
+		save = function(c) c.R(0.5, 0.5, 0.7, 0.7) c.R(0.5, 0.3, 0.36, 0.22) c.L(0.3, 0.68, 0.7, 0.68) end,
+		check = function(c) c.P(0.2, 0.55, 0.42, 0.76, 0.8, 0.28) end,
+	}
+	function Library.Icon(name, parent, size, color, center)
+		local fn = Library.Icons[name]
+		if not fn then return nil end
+		local f = build(fn, parent, size or 16, color or Theme.Text)
+		if center then
+			f.AnchorPoint = Vector2.new(0.5, 0.5)
+			f.Position = UDim2.fromScale(0.5, 0.5)
+		end
+		return f
+	end
+	function Library.IconColor(f, color)
+		if not f then return end
+		for _, d in ipairs(f:GetDescendants()) do
+			if d:IsA("Frame") and d.BackgroundTransparency < 1 then
+				d.BackgroundColor3 = color
+			elseif d:IsA("UIStroke") then
+				d.Color = color
+			end
+		end
+	end
+
+	--// Pembungkus
+	local prevCreate = Library.CreateWindow
+	function Library:CreateWindow(opts)
+		local win = prevCreate(self, opts)
+		if not win then return nil end
+		win.Overlay = New("Frame", { Name = "Overlay", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 100, Parent = win.Gui })
+		win:_loadUI()
+		if win._ui.lang then Library.Lang = win._ui.lang end
+		local p = win._ui.pos
+		if type(p) == "table" and #p == 4 then
+			win.Root.Position = UDim2.new(p[1], p[2], p[3], p[4])
+			task.delay(0.1, function()
+				if win.Gui then ClampToScreen(win.Root, function() return win._scale.Scale end) end
+			end)
+		end
+		win:Every(1.5, function()
+			local q = win.Root.Position
+			local c = { q.X.Scale, q.X.Offset, q.Y.Scale, q.Y.Offset }
+			local l = win._lastPos
+			if not l or l[1] ~= c[1] or l[2] ~= c[2] or l[3] ~= c[3] or l[4] ~= c[4] then
+				win._lastPos = c
+				win:_store("pos", c)
+			end
+			win:_flushUI()
+		end, true)
+		return win
+	end
+
+	local baseDestroy = Window.Destroy
+	function Window:Destroy()
+		pcall(function() self:_flushUI() end)
+		return baseDestroy(self)
+	end
+
+	local baseAddTab = Window.AddTab
+	function Window:AddTab(opts)
+		if type(opts) == "string" then opts = { Name = opts } end
+		opts = copy(opts or {})
+		local vec = type(opts.Icon) == "string" and Library.Icons[opts.Icon] and opts.Icon
+		if vec then opts.Icon = "" end
+		local t = baseAddTab(self, opts)
+		if vec then
+			t._icon.Visible = false
+			t._vec = Library.Icon(vec, t._badge, 16, Theme.SubText, true)
+			Library.IconColor(t._vec, self._activeTab == t and Color3.new(1, 1, 1) or Theme.SubText)
+		end
+		if not self._restored and self:_load("tab") == t.Name then
+			self._restored = true
+			self:_select(t)
+		end
+		return t
+	end
+
+	local baseSelect = Window._select
+	function Window:_select(tab)
+		baseSelect(self, tab)
+		for _, t in ipairs(self._tabs) do
+			if t._vec then Library.IconColor(t._vec, t == tab and Color3.new(1, 1, 1) or Theme.SubText) end
+		end
+		self:_store("tab", tab.Name)
+	end
+
+	local baseSettings = Window.AddSettings
+	if baseSettings then
+		function Window:AddSettings(name)
+			local tab = baseSettings(self, name)
+			tab:AddSection(Library:T("langSec"))
+			tab:AddDropdown({
+				Name = Library:T("lang"), Options = { "Indonesia", "English" }, Default = Library.Lang == "en" and "English" or "Indonesia",
+				Callback = function(v)
+					local code = v == "English" and "en" or "id"
+					if code ~= Library.Lang then
+						Library.Lang = code
+						self:_store("lang", code)
+					end
+				end,
+			})
+			return tab
+		end
+	end
+end
+--// ===== SELESAI P1 =====
+
+--// ===== MULAI P2 (zona dan layout) =====
+do
+	local Stats = game:GetService("Stats")
+	local baseLayout = Window._layout
+	local GOLD, GREEN = Color3.fromHex("#F2C94C"), Color3.fromHex("#5BD99A")
+	Library:AddStrings("id", { empty = "Tidak ada hasil untuk '%s'", clear = "Hapus pencarian", active = "%d aktif", saved = "Tersimpan", unsaved = "Belum disimpan", locked = "Terkunci", keyOk = "Key aktif", keyDays = "Key aktif · %d hari", keyBad = "Key tidak aktif", search = "Cari..." })
+	Library:AddStrings("en", { empty = "No results for '%s'", clear = "Clear search", active = "%d active", saved = "Saved", unsaved = "Unsaved", locked = "Locked", keyOk = "Key active", keyDays = "Key active · %d days", keyBad = "Key inactive", search = "Search..." })
+
+	--// Drag dengan kunci
+	MakeDraggable = function(handle, target, track, onClick, getScale)
+		local dragging, dragStart, startPos, dragInput, moved = false, nil, nil, nil, 0
+		track(handle.InputBegan:Connect(function(input)
+			if not IsPress(input) or target:GetAttribute("XLocked") then return end
+			dragging, moved, dragStart, startPos = true, 0, input.Position, target.Position
+			local conn
+			conn = input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					dragging = false
+					conn:Disconnect()
+					if onClick and moved < 6 then onClick() end
+				end
+			end)
+		end))
+		track(handle.InputChanged:Connect(function(input)
+			if IsMove(input) then dragInput = input end
+		end))
+		track(UserInputService.InputChanged:Connect(function(input)
+			if dragging and input == dragInput then
+				local d = input.Position - dragStart
+				moved = math.max(moved, d.Magnitude)
+				local s = getScale and getScale() or 1
+				target.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X / s, startPos.Y.Scale, startPos.Y.Offset + d.Y / s)
+				ClampToScreen(target, getScale)
+			end
+		end))
+	end
+
+	local function railTab(t, v)
+		if v then
 			t._badge.Visible = true
 			t._badge.AnchorPoint = Vector2.new(0.5, 0)
 			t._badge.Position = UDim2.new(0.5, 0, 0, 7)
@@ -4613,66 +4969,810 @@ do
 		end
 	end
 
-	function Window:_layout()
-		baseLayout(self)
-		local vertical = self._rail == true and not self._mobileLayout
-		if self._railVertical ~= vertical then
-			self._railVertical = vertical
-			for _, t in ipairs(self._tabs) do self:_railTab(t, vertical) end
+	local function pingMs()
+		local ok, v = pcall(function() return Stats.Network.ServerStatsItem["Data Ping"]:GetValue() end)
+		return ok and type(v) == "number" and math.floor(v + 0.5) or nil
+	end
+
+	--// Zona
+	function Window:_buildZones()
+		local main, T = self.Main, Theme
+		local Z = {}
+		self.Zones = Z
+		self._zv = { Toolbar = true, Banner = false, Pin = false, Preview = false }
+		local function zone(name)
+			return New("Frame", { Name = name, BackgroundColor3 = T.Card, BackgroundTransparency = self._cardT, BorderSizePixel = 0, Visible = false, Parent = main },
+				{ Corner(10), Stroke(T.Glow, 1, 0.72) })
 		end
-		if not vertical then return end
-		local RW = 76
-		self._sidebar.Size = UDim2.new(0, RW, 1, -77)
-		self._content.Position = UDim2.fromOffset(RW + 20, 67)
-		self._content.Size = UDim2.new(1, -(RW + 30), 1, -77)
-		self._searchBox.Visible = false
-		self._profile.Visible = false
-		self._tabList.Position = UDim2.fromOffset(0, 10)
-		self._tabList.Size = UDim2.new(1, 0, 1, -20)
-		for _, t in ipairs(self._tabs) do t.Button.Size = UDim2.new(1, 0, 0, 58) end
+		local function txt(parent, p)
+			p.BackgroundTransparency, p.Font, p.TextSize = 1, p.Font or FONT.Medium, p.TextSize or 12
+			p.TextColor3, p.TextTruncate, p.Parent = p.TextColor3 or T.SubText, Enum.TextTruncate.AtEnd, parent
+			return New("TextLabel", p)
+		end
+
+		local header = main:FindFirstChild("Header")
+		Z.Header = header
+		Z.Chip = New("TextLabel", {
+			AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -136, 0.5, 0), Size = UDim2.fromOffset(104, 24),
+			BackgroundColor3 = T.Secondary, BackgroundTransparency = self._fieldT, Font = FONT.Semi, TextSize = 11,
+			TextColor3 = T.SubText, Text = "v" .. Library.Version, Parent = header,
+		}, { Corner(8) })
+
+		Z.Toolbar = zone("Toolbar")
+		local tb = Z.Toolbar
+		Z.Toggle = New("TextButton", { Position = UDim2.fromOffset(4, 4), Size = UDim2.fromOffset(28, 28), BackgroundTransparency = 1, Text = "", AutoButtonColor = false, Parent = tb })
+		Library.Icon("list", Z.Toggle, 16, T.SubText, true)
+		Z.Toggle.MouseButton1Click:Connect(function()
+			self:SetSidebar(({ full = "rail", rail = "hidden", hidden = "full" })[self._sbMode or "full"])
+		end)
+		Z.Crumb = New("TextButton", {
+			BackgroundTransparency = 1, Position = UDim2.fromOffset(38, 0), Size = UDim2.new(0, 100, 1, 0), Font = FONT.Semi, TextSize = 14,
+			TextColor3 = T.Text, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd, Text = "",
+			AutoButtonColor = false, Parent = tb,
+		})
+		Z.Crumb.MouseButton1Click:Connect(function()
+			local t = self._activeTab
+			if t then Tween(t.Page, 0.2, { CanvasPosition = Vector2.zero }) end
+		end)
+		local sb = self._searchBox
+		sb.Parent, sb.AnchorPoint, sb.Position, sb.PlaceholderText = tb, Vector2.new(1, 0.5), UDim2.new(1, -6, 0.5, 0), Library:T("search")
+
+		Z.Banner = zone("Banner")
+		Z.BannerBar = New("Frame", { Position = UDim2.fromOffset(0, 8), Size = UDim2.new(0, 3, 1, -16), BackgroundColor3 = T.Blue, BorderSizePixel = 0, Parent = Z.Banner }, { Corner(2) })
+		Z.BannerText = txt(Z.Banner, { Position = UDim2.fromOffset(14, 0), Size = UDim2.new(1, -50, 1, 0), TextColor3 = T.Text, TextXAlignment = Enum.TextXAlignment.Left })
+		Z.BannerAct = New("TextButton", {
+			AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -38, 0.5, 0), Size = UDim2.fromOffset(70, 24), BackgroundColor3 = T.Blue,
+			AutoButtonColor = false, Font = FONT.Semi, TextSize = 11, TextColor3 = T.Background, Text = "", Visible = false, Parent = Z.Banner,
+		}, { Corner(7) })
+		Z.BannerX = New("TextButton", { AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -6, 0.5, 0), Size = UDim2.fromOffset(26, 26), BackgroundTransparency = 1, Text = "", AutoButtonColor = false, Parent = Z.Banner })
+		Library.Icon("close", Z.BannerX, 12, T.SubText, true)
+		Z.BannerAct.MouseButton1Click:Connect(function()
+			local b = self._banner
+			if b and b.Action then SafeCall(b.Action.Callback) end
+		end)
+		Z.BannerX.MouseButton1Click:Connect(function()
+			local b = self._banner
+			if b and b.Id then
+				local bans = self:_load("bans", nil) or {}
+				bans[b.Id] = true
+				self:_store("bans", bans)
+			end
+			self._zv.Banner = false
+			self:_layout()
+		end)
+
+		Z.Pin = zone("Pin")
+
+		local st = New("Frame", { Name = "Status", AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromScale(0, 1), Size = UDim2.new(1, 0, 0, 26), BackgroundColor3 = T.Background, BackgroundTransparency = 0.5, BorderSizePixel = 0, Parent = main })
+		New("Frame", { Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = T.Border, BorderSizePixel = 0, Parent = st })
+		Z.Status = st
+		Z.StLeft = txt(st, { Position = UDim2.fromOffset(14, 0), Size = UDim2.new(0.34, -14, 1, 0), TextXAlignment = Enum.TextXAlignment.Left })
+		Z.StMid = txt(st, { Position = UDim2.fromScale(0.34, 0), Size = UDim2.fromScale(0.3, 1) })
+		Z.StRight = txt(st, { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -34, 0, 0), Size = UDim2.new(0.36, -34, 1, 0), TextXAlignment = Enum.TextXAlignment.Right })
+
+		local h = New("TextButton", { AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -6, 0.5, 0), Size = UDim2.fromOffset(22, 22), BackgroundTransparency = 1, Text = "", AutoButtonColor = false, Parent = st })
+		for _, b in ipairs({ { 14, 0 }, { 8, 5 } }) do
+			New("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, b[2], 0.5, b[2]), Size = UDim2.fromOffset(b[1], 2), Rotation = -45, BackgroundColor3 = T.SubText, BorderSizePixel = 0, Parent = h })
+		end
+		local last = 0
+		h.InputBegan:Connect(function(input)
+			if not IsPress(input) then return end
+			local now = os.clock()
+			if now - last < 0.35 then
+				last = 0
+				self:ResetSize()
+				return
+			end
+			last = now
+			if self._maxed or self._mobileLayout then return end
+			local s = self._scale.Scale
+			local sx, sy = input.Position.X, input.Position.Y
+			local w0, h0, p0 = self.Root.Size.X.Offset, self.Root.Size.Y.Offset, self.Root.Position
+			self._uScale, self._uW, self._uH = s, w0, h0
+			local conn, endc
+			conn = UserInputService.InputChanged:Connect(function(i)
+				if not IsMove(i) or not self.Gui then return end
+				self._uW, self._uH = w0 + (i.Position.X - sx) / s, h0 + (i.Position.Y - sy) / s
+				self:_layout()
+				local nw, nh = self.Root.Size.X.Offset, self.Root.Size.Y.Offset
+				self.Root.Position = UDim2.new(p0.X.Scale, p0.X.Offset + (nw - w0) * s / 2, p0.Y.Scale, p0.Y.Offset + (nh - h0) * s / 2)
+			end)
+			endc = input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					conn:Disconnect()
+					endc:Disconnect()
+					self:_store("size", { self._uW, self._uH, self._uScale })
+				end
+			end)
+		end)
+
+		self:_track(RunService.Heartbeat:Connect(function(dt)
+			self._fps = (self._fps or 60) * 0.95 + (1 / math.max(dt, 1 / 240)) * 0.05
+		end))
 	end
 
-	function Window:SetRail(on)
-		self._rail = on and true or false
-		self._railVertical = nil
-		self:_layout()
+	--// Layout
+	function Window:_layout()
+		local Z = self.Zones
+		if not Z or not self.Gui then return baseLayout(self) end
+		local cam = workspace.CurrentCamera
+		local vp = cam and cam.ViewportSize or Vector2.new(800, 400)
+		local mobile, maxed = vp.X <= 620, self._maxed == true
+		local mult = math.clamp(self._mult or 1, 0.5, 1.5)
+		local baseH = (mobile and MOBILE_H or WIN_H) + 26
+		local W, H, s
+		if self._uW and not mobile and not maxed and MIN_W * (self._uScale or 1) <= vp.X * 0.98 then
+			s = self._uScale or 1
+			W = math.clamp(self._uW, MIN_W, math.max(MIN_W, vp.X * 0.96 / s))
+			H = math.clamp(self._uH or baseH, 300, math.max(300, vp.Y * 0.92 / s))
+		else
+			local fitH = vp.Y * (maxed and 0.94 or 0.88) / (baseH * mult)
+			local fitW = vp.X * (maxed and 0.98 or 0.96) / (MIN_W * mult)
+			s = math.clamp(math.min(fitH, fitW, (maxed and 1.4 or 1.15) / mult) * mult, 0.35, 1.8)
+			W = mobile and MIN_W or math.clamp(vp.X * (maxed and 0.96 or 0.66) / math.max(s, 0.01), MIN_W, maxed and 960 or MAX_W)
+			H = baseH
+		end
+		self.Root.Size = UDim2.fromOffset(W, H)
+		self._targetScale = s
+		if self._visible then self._scale.Scale = s end
+
+		local mode = self._sbMode or "full"
+		local rail = not mobile and mode == "rail"
+		local sbW = mobile and 0 or (mode == "full" and (W < 560 and 148 or 168) or (rail and 76 or 0))
+		local bodyBot = H - 36
+		local cx, cy, cw
+		local sidebar = self._sidebar
+		sidebar.Position = UDim2.fromOffset(10, 67)
+		if mobile then
+			sidebar.Visible = true
+			sidebar.Size = UDim2.new(1, -20, 0, 52)
+			self._tabList.Position, self._tabList.Size = UDim2.fromOffset(0, 3), UDim2.new(1, 0, 0, 46)
+			self._tabLayout.FillDirection = Enum.FillDirection.Horizontal
+			self._tabList.ScrollingDirection = Enum.ScrollingDirection.X
+			self._tabList.AutomaticCanvasSize = Enum.AutomaticSize.X
+			self._profile.Visible = false
+			cx, cy, cw = 10, 125, W - 20
+		else
+			sidebar.Visible = sbW > 0
+			sidebar.Size = UDim2.new(0, sbW, 0, bodyBot - 67)
+			self._tabList.Position, self._tabList.Size = UDim2.fromOffset(0, 10), UDim2.new(1, 0, 1, -80)
+			self._tabLayout.FillDirection = Enum.FillDirection.Vertical
+			self._tabList.ScrollingDirection = Enum.ScrollingDirection.Y
+			self._tabList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+			self._profile.Visible = true
+			self._profile.ClipsDescendants = true
+			cx = sbW > 0 and (sbW + 20) or 10
+			cy, cw = 67, W - cx - 10
+		end
+		for _, t in ipairs(self._tabs) do
+			t.Button.Size = mobile and UDim2.fromOffset(116, 38) or (rail and UDim2.new(1, 0, 0, 58) or UDim2.new(1, 0, 0, 42))
+			railTab(t, rail)
+		end
+
+		local y, zv = cy, self._zv
+		Z.Toolbar.Visible = zv.Toolbar
+		if zv.Toolbar then
+			Z.Toolbar.Position, Z.Toolbar.Size = UDim2.fromOffset(cx, y), UDim2.fromOffset(cw, 36)
+			local sw = mobile and (cw - 12) or math.clamp(cw * 0.45, 150, 250)
+			self._searchBox.Size = UDim2.fromOffset(sw, 28)
+			Z.Toggle.Visible, Z.Crumb.Visible = not mobile, not mobile
+			Z.Crumb.Size = UDim2.new(0, math.max(cw - sw - 56, 40), 1, 0)
+			y += 42
+		end
+		Z.Banner.Visible = zv.Banner
+		if zv.Banner then
+			Z.Banner.Position, Z.Banner.Size = UDim2.fromOffset(cx, y), UDim2.fromOffset(cw, 36)
+			y += 42
+		end
+		Z.Pin.Visible = zv.Pin
+		if zv.Pin then
+			Z.Pin.Position, Z.Pin.Size = UDim2.fromOffset(cx, y), UDim2.fromOffset(cw, 34)
+			y += 40
+		end
+		local pw = 0
+		if Z.Preview then
+			local showP = zv.Preview and not mobile and W >= 640
+			Z.Preview.Visible = showP
+			if showP then
+				pw = 220
+				Z.Preview.Position, Z.Preview.Size = UDim2.fromOffset(cx + cw - pw, y), UDim2.fromOffset(pw, bodyBot - y)
+				pw += 8
+			end
+		end
+		self._content.Position = UDim2.fromOffset(cx, y)
+		self._content.Size = UDim2.fromOffset(cw - pw, math.max(bodyBot - y, 60))
+
+		local showChip = W >= 560
+		Z.Chip.Visible = showChip
+		for _, c in ipairs(Z.Header:GetChildren()) do
+			if c:IsA("TextLabel") and c ~= Z.Chip then
+				c.Size = UDim2.new(1, -(c.Position.X.Offset + 136 + (showChip and 108 or 0)), 0, c.Size.Y.Offset)
+			end
+		end
+		self._mobileLayout = mobile
+		self._notifyHolder.Size = UDim2.new(0, math.max(150, math.min(270, vp.X - 24)), 1, -24)
+		ClampToScreen(self.Root, function() return self._scale.Scale end)
 	end
 
-	local baseAddTab = Window.AddTab
-	function Window:AddTab(opts)
-		local t = baseAddTab(self, opts)
-		if self._rail then
-			self._railVertical = nil
+	--// Status bar
+	function Window:_snapshot()
+		local ok, s = pcall(HttpService.JSONEncode, HttpService, self.Flags)
+		return ok and s or nil
+	end
+	function Window:_isDirty()
+		if not self._snap then
+			if self._born and os.clock() - self._born > 2 then self._snap = self:_snapshot() end
+			return false
+		end
+		return self:_snapshot() ~= self._snap
+	end
+	for _, nm in ipairs({ "SaveConfig", "LoadConfig" }) do
+		local b = Window[nm]
+		Window[nm] = function(self, ...)
+			local r = table.pack(b(self, ...))
+			if r[1] then self._snap = self:_snapshot() end
+			return table.unpack(r, 1, r.n)
+		end
+	end
+	function Window:_statusTick()
+		local Z = self.Zones
+		if not Z or not self.Gui then return end
+		local n = 0
+		for _, e in ipairs(self._regList or {}) do
+			if (e.Kind == "toggle" or e.Kind == "module") and e.Obj and e.Obj.Get then
+				local ok, v = pcall(e.Obj.Get, e.Obj)
+				if ok and v == true then n += 1 end
+			end
+		end
+		Z.StLeft.Text = "• " .. Library:T("active", n)
+		local ping = pingMs()
+		if self._statusMsg and os.clock() < (self._statusUntil or 0) then
+			Z.StMid.Text = self._statusMsg
+		else
+			Z.StMid.Text = string.format("FPS %d%s", math.floor(self._fps or 0), ping and (" · " .. ping .. " ms") or "")
+		end
+		local dirty = self:_isDirty()
+		Z.StRight.Text = (dirty and Library:T("unsaved") or Library:T("saved")) .. (self._locked and (" · " .. Library:T("locked")) or "")
+		Z.StRight.TextColor3 = dirty and GOLD or Theme.SubText
+		Z.Chip.Text = "v" .. Library.Version .. (ping and (" · " .. ping .. "ms") or "")
+	end
+	--// API
+	function Window:SetStatus(text, secs)
+		self._statusMsg, self._statusUntil = tostring(text), os.clock() + (secs or 3)
+		self:_statusTick()
+	end
+	function Window:SetZone(name, on)
+		if self._zv and self._zv[name] ~= nil then
+			self._zv[name] = on and true or false
 			self:_layout()
 		end
+	end
+	function Window:SetSidebar(mode)
+		if mode ~= "full" and mode ~= "rail" and mode ~= "hidden" then return false end
+		self._sbMode = mode
+		self:_store("sb", mode)
+		self:_layout()
+		return true
+	end
+	function Window:SetRail(on) return self:SetSidebar(on and "rail" or "full") end
+	function Window:SetLocked(on)
+		self._locked = on and true or false
+		self.Root:SetAttribute("XLocked", self._locked or nil)
+		self:_store("locked", self._locked)
+		if self.Zones then self:_statusTick() end
+	end
+	function Window:ResetSize()
+		self._uW, self._uH, self._uScale = nil, nil, nil
+		self:_store("size", nil)
+		self:_layout()
+	end
+	function Window:SetBanner(o)
+		local Z = self.Zones
+		if not Z then return end
+		local bans = self:_load("bans", nil) or {}
+		if type(o) ~= "table" or (o.Id and bans[o.Id]) then
+			self._zv.Banner = false
+			return self:_layout()
+		end
+		self._banner = o
+		Z.BannerBar.BackgroundColor3 = ({ warn = GOLD, success = GREEN, error = Theme.Red })[o.Kind] or Theme.Blue
+		Z.BannerText.Text = tostring(o.Text or "")
+		local act = type(o.Action) == "table" and o.Action
+		Z.BannerAct.Visible = act ~= nil
+		Z.BannerAct.Text = act and tostring(act.Text or "OK") or ""
+		Z.BannerX.Visible = o.Dismissible ~= false
+		Z.BannerText.Size = UDim2.new(1, act and -126 or -50, 1, 0)
+		self._zv.Banner = true
+		self:_layout()
+	end
+	function Window:SetKeyInfo(o)
+		o = o or {}
+		local lbl
+		for _, c in ipairs(self._profile:GetChildren()) do
+			if c:IsA("TextLabel") and c.Position.Y.Offset == 26 then lbl = c end
+		end
+		if not lbl then return end
+		local ok = o.Status == nil or tostring(o.Status):lower() == "active"
+		local txt = Library:T(ok and "keyOk" or "keyBad")
+		if ok and tonumber(o.Expires) then
+			local d = math.floor((o.Expires - os.time()) / 86400)
+			ok = d >= 0
+			txt = ok and Library:T("keyDays", d) or Library:T("keyBad")
+		end
+		lbl.Text, lbl.TextColor3 = txt, ok and GREEN or Theme.Red
+	end
+
+	--// Pembungkus
+	local selectP1 = Window._select
+	function Window:_select(tab)
+		selectP1(self, tab)
+		if self.Zones then self.Zones.Crumb.Text = tab.Name end
+	end
+	local addTabP1 = Window.AddTab
+	function Window:AddTab(o)
+		local t = addTabP1(self, o)
+		self:_layout()
 		return t
+	end
+	local baseSearch = Tab._applySearch
+	function Tab:_applySearch(q)
+		baseSearch(self, q)
+		local any = false
+		for _, it in ipairs(self._items) do
+			if it.Frame.Visible then any = true break end
+		end
+		local show = (q or "") ~= "" and not any
+		local e = self._empty
+		if show and not e then
+			local f = New("Frame", { Name = "Empty", Size = UDim2.new(1, 0, 0, 92), BackgroundTransparency = 1, LayoutOrder = 1000000, Visible = false, Parent = self.Page })
+			local lbl = New("TextLabel", { Position = UDim2.fromOffset(0, 8), Size = UDim2.new(1, 0, 0, 38), BackgroundTransparency = 1, Font = FONT.Medium, TextSize = 13, TextColor3 = Theme.SubText, TextWrapped = true, Text = "", Parent = f })
+			local b = New("TextButton", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 52), Size = UDim2.fromOffset(150, 30), BackgroundColor3 = Theme.Secondary, AutoButtonColor = false, Font = FONT.Semi, TextSize = 12, TextColor3 = Theme.Text, Text = Library:T("clear"), Parent = f }, { Corner(9) })
+			b.MouseButton1Click:Connect(function() self.Window._searchBox.Text = "" end)
+			e = { Frame = f, Label = lbl }
+			self._empty = e
+		end
+		if e then
+			e.Frame.Visible = show
+			if show then e.Label.Text = Library:T("empty", q) end
+		end
 	end
 
 	local prevCreate = Library.CreateWindow
 	function Library:CreateWindow(opts)
 		local win = prevCreate(self, opts)
-		if win and type(opts) == "table" and opts.Rail then win:SetRail(true) end
+		if not win then return nil end
+		win._born = os.clock()
+		win._sbMode = (type(opts) == "table" and opts.Rail) and "rail" or win:_load("sb", "full")
+		local sz = win:_load("size", nil)
+		if type(sz) == "table" and #sz == 3 then win._uW, win._uH, win._uScale = sz[1], sz[2], sz[3] end
+		win:_buildZones()
+		win:SetLocked(win:_load("locked", false) == true)
+		win:Every(1, function() win:_statusTick() end)
+		win:_layout()
+		win:_statusTick()
 		return win
 	end
 end
+--// ===== SELESAI P2 =====
 
---// XevoraUI Pro Pack | BAGIAN 4 | section dan divider tetap di dalam grup
+--// ===== MULAI P3 (navigasi dan pencarian) =====
 do
-	local baseSection = Tab.AddSection
-	function Tab:AddSection(name)
-		baseSection(self, name)
-		if self._container then
-			local sec = self._sections[#self._sections]
-			if sec and sec.Frame then sec.Frame.Parent = self._container end
+	local GuiService = game:GetService("GuiService")
+	Library:AddStrings("id", { all = "Semua", cmdSub = "Perintah", tabSub = "Tab" })
+	Library:AddStrings("en", { all = "All", cmdSub = "Command", tabSub = "Tab" })
+
+	local function placeBadge(t)
+		local p = t._pill
+		if not p then return end
+		local rail = t.Window._sbMode == "rail" and not t.Window._mobileLayout
+		p.AnchorPoint = rail and Vector2.new(1, 0) or Vector2.new(1, 0.5)
+		p.Position = rail and UDim2.new(1, -6, 0, 4) or UDim2.new(1, -8, 0.5, 0)
+	end
+
+	function Tab:SetBadge(text, color)
+		if not self.Button then return end
+		if text == nil or text == "" or text == 0 then
+			if self._pill then self._pill.Visible = false end
+			return
+		end
+		if not self._pill then
+			self._pill = New("TextLabel", {
+				Size = UDim2.fromOffset(0, 16), AutomaticSize = Enum.AutomaticSize.X, BackgroundColor3 = Theme.Blue,
+				Font = FONT.Bold, TextSize = 10, TextColor3 = Theme.Background, ZIndex = 3, Parent = self.Button,
+			}, { Corner(0, 0.5), Pad(6, 0, 6, 0) })
+			placeBadge(self)
+		end
+		self._pill.Text = tostring(text)
+		self._pill.BackgroundColor3 = typeof(color) == "Color3" and color or Theme.Blue
+		self._pill.Visible = true
+	end
+
+	function Tab:AutoBadge(on) self._auto = on ~= false end
+
+	local rowP = Tab._row
+	function Tab:_row(h, st)
+		local r = rowP(self, h, st)
+		local it = self._items[#self._items]
+		if it and it.Frame == r then it.Disp = tostring(st or "") end
+		if self._cols and not self._rf then
+			self._rf = true
+			task.defer(function()
+				self._rf, self._colsDirty = false, true
+				self:_reflow()
+			end)
+		end
+		return r
+	end
+
+	local groupP = Tab.AddGroup
+	if groupP then
+		function Tab:AddGroup(o)
+			local g = groupP(self, o)
+			local it = self._items[#self._items]
+			if it then it.IsGroup = true end
+			self.Window._groups[g._container] = g
+			return g
 		end
 	end
 
-	local baseDivider = Tab.AddDivider
-	function Tab:AddDivider()
-		local line = baseDivider(self)
-		if self._container and line then line.Parent = self._container end
-		return line
+	function Tab:AddSubTabs(names)
+		local win, n = self.Window, #names
+		if n == 0 then return {} end
+		local base = self._order
+		local host = self._container or self.Page
+		local key = "sub_" .. self.Name .. base
+		local cur = math.clamp(tonumber(win:_load(key, 1)) or 1, 1, n)
+		local bar = New("Frame", { Size = UDim2.new(1, 0, 0, 36), BackgroundTransparency = 1, LayoutOrder = base, Parent = host },
+			{ New("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }) })
+		self._order = base + 2
+		local chips, pages, out = {}, {}, {}
+		local function paint()
+			for i, c in ipairs(chips) do
+				local on = i == cur
+				c.BackgroundColor3 = on and Theme.Blue or Theme.Secondary
+				c.BackgroundTransparency = on and 0.05 or win._fieldT
+				c.TextColor3 = on and Theme.Background or Theme.Text
+				pages[i].Visible = on
+			end
+		end
+		for i, nm in ipairs(names) do
+			local c = New("TextButton", {
+				Size = UDim2.new(1 / n, -6 * (n - 1) / n, 1, 0), AutoButtonColor = false, Font = FONT.Semi, TextSize = 12,
+				TextTruncate = Enum.TextTruncate.AtEnd, Text = tostring(nm), LayoutOrder = i, Parent = bar,
+			}, { Corner(9), Stroke(Theme.Glow, 1, 0.7) })
+			local cont = New("Frame", {
+				Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+				LayoutOrder = base + 1, Visible = false, Parent = host,
+			}, { New("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }) })
+			local px = setmetatable({ Window = win, Page = self.Page, Name = self.Name, _items = self._items, _sections = self._sections, _order = 1, _container = cont }, Tab)
+			local function sel()
+				cur = i
+				win:_store(key, i)
+				paint()
+			end
+			px.Select = sel
+			win._subs[cont] = sel
+			c.MouseButton1Click:Connect(sel)
+			chips[i], pages[i], out[i] = c, cont, px
+		end
+		paint()
+		return out
+	end
+
+	function Tab:SetColumns(n)
+		self._cols = n == 1 and 1 or 2
+		self:_reflow(true)
+	end
+
+	function Tab:_reflow(force)
+		local win, page = self.Window, self.Page
+		if not self._cols or not page then return end
+		local want = (self._cols == 2 and not win._mobileLayout and win.Root.Size.X.Offset >= 560) and 2 or 1
+		if not force and want == self._colsOn and not self._colsDirty then return end
+		self._colsDirty, self._colsOn = false, want
+		local own, mine = self._colSet or {}, {}
+		for _, it in ipairs(self._items) do
+			local p = it.Frame.Parent
+			if p == page or own[p] then table.insert(mine, it) end
+		end
+		for _, it in ipairs(mine) do it.Frame.Parent = page end
+		for h in pairs(self._hosts or {}) do h:Destroy() end
+		self._hosts, self._colSet = {}, {}
+		if want == 1 then return end
+		local blocks, cur, last = {}, nil, false
+		for _, it in ipairs(mine) do
+			if not cur or it.Section ~= last then
+				cur, last = {}, it.Section
+				table.insert(blocks, cur)
+			end
+			table.insert(cur, it)
+		end
+		for _, blk in ipairs(blocks) do
+			local host = New("Frame", {
+				Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
+				LayoutOrder = blk[1].Frame.LayoutOrder, Parent = page,
+			}, { New("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }) })
+			self._hosts[host] = true
+			local cols, hs = {}, { 0, 0 }
+			for i = 1, 2 do
+				cols[i] = New("Frame", {
+					Size = UDim2.new(0.5, -4, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1, LayoutOrder = i, Parent = host,
+				}, { New("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }) })
+				self._colSet[cols[i]] = true
+			end
+			for _, it in ipairs(blk) do
+				local k = hs[1] <= hs[2] and 1 or 2
+				it.Frame.Parent = cols[k]
+				local h = it.Frame.Size.Y.Offset
+				hs[k] += (h > 0 and h or 56) + 8
+			end
+		end
+	end
+
+	local layoutP2 = Window._layout
+	function Window:_layout()
+		layoutP2(self)
+		for _, t in ipairs(self._tabs) do
+			placeBadge(t)
+			if t._cols then t:_reflow() end
+		end
+	end
+
+	local selP2 = Window._select
+	function Window:_select(tab)
+		local old = self._activeTab
+		local oi = old and table.find(self._tabs, old)
+		selP2(self, tab)
+		local ni = table.find(self._tabs, tab)
+		if oi and ni and ni < oi then
+			tab.Page.Position = UDim2.fromOffset(-18, 0)
+			Tween(tab.Page, 0.2, { Position = UDim2.fromOffset(0, 0) })
+		end
+	end
+
+	--// Lompat ke komponen
+	function Window:Jump(target)
+		local item = target
+		if type(target) == "string" then
+			local e = self:Find(target)
+			item = e and e.Item
+		end
+		if type(item) ~= "table" or not item.Frame then return false end
+		local tab
+		for _, t in ipairs(self._tabs) do
+			if table.find(t._items, item) then tab = t break end
+		end
+		if not tab then return false end
+		if self._searchBox.Text ~= "" then self._searchBox.Text = "" end
+		self:_select(tab)
+		local a = item.Frame.Parent
+		while a and a ~= tab.Page do
+			local g = self._groups[a]
+			if g then g:SetOpen(true) end
+			local s = self._subs[a]
+			if s then s() end
+			a = a.Parent
+		end
+		task.delay(0.1, function()
+			if not self.Gui or not item.Frame.Parent then return end
+			local y = (item.Frame.AbsolutePosition.Y - tab.Page.AbsolutePosition.Y) / self._scale.Scale + tab.Page.CanvasPosition.Y
+			tab.Page.CanvasPosition = Vector2.new(0, math.max(0, y - 6))
+			local st = item.Frame:FindFirstChildOfClass("UIStroke")
+			if st then
+				Tween(st, 0.15, { Color = Theme.Blue, Transparency = 0 })
+				task.delay(0.9, function()
+					if st.Parent then Tween(st, 0.4, { Color = Theme.Glow, Transparency = 0.72 }) end
+				end)
+			end
+		end)
+		return true
+	end
+
+	function Window:AddCommand(o)
+		if type(o) ~= "table" or not o.Name then return end
+		table.insert(self._cmds, {
+			Name = tostring(o.Name), Desc = o.Desc and tostring(o.Desc), Callback = o.Callback,
+			Key = string.lower(tostring(o.Name) .. " " .. tostring(o.Keywords or "")),
+		})
+	end
+
+	function Window:SetGlobalSearch(on)
+		self._gsOn = on and true or false
+		self:_store("gs", self._gsOn)
+		if self._gs then
+			self._gs.Paint()
+			self._gs.Show(self._searchBox.Text)
+		end
+	end
+
+	function Window:_buildSearch()
+		local win, sb = self, self._searchBox
+		for _, c in ipairs(sb:GetChildren()) do
+			if c:IsA("UIPadding") then c.PaddingRight = UDim.new(0, 58) end
+		end
+		local chip = New("TextButton", {
+			AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, 53, 0.5, 0), Size = UDim2.fromOffset(50, 20),
+			AutoButtonColor = false, Font = FONT.Semi, TextSize = 10, Text = Library:T("all"), ZIndex = 2, Parent = sb,
+		}, { Corner(6) })
+		local panel = New("Frame", {
+			Name = "GlobalResults", Size = UDim2.fromScale(1, 1), BackgroundColor3 = Theme.Panel, BackgroundTransparency = 0.04,
+			BorderSizePixel = 0, Visible = false, ZIndex = 20, Parent = self._content,
+		}, { Corner(10) })
+		local list = New("ScrollingFrame", {
+			Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 3,
+			ScrollBarImageColor3 = Theme.Blue, CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, Parent = panel,
+		}, { New("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }), Pad(0, 0, 6, 8) })
+		local res = {}
+
+		local function paint()
+			chip.BackgroundColor3 = win._gsOn and Theme.Blue or Theme.Secondary
+			chip.TextColor3 = win._gsOn and Theme.Background or Theme.SubText
+		end
+
+		local function show(q)
+			for _, c in ipairs(list:GetChildren()) do
+				if c:IsA("GuiObject") then c:Destroy() end
+			end
+			res = {}
+			if q == "" or (q:sub(1, 1) ~= ">" and not win._gsOn) then
+				panel.Visible = false
+				return
+			end
+			if q:sub(1, 1) == ">" then
+				local k = q:sub(2):lower():gsub("^%s+", "")
+				for _, c in ipairs(win._cmds) do
+					if k == "" or c.Key:find(k, 1, true) then
+						table.insert(res, { Title = c.Name, Sub = c.Desc or Library:T("cmdSub"), Run = c.Callback })
+					end
+				end
+			else
+				local k = q:lower()
+				for _, t in ipairs(win._tabs) do
+					if t.Name:lower():find(k, 1, true) then
+						table.insert(res, { Title = t.Name, Sub = Library:T("tabSub"), Run = function() win:_select(t) end })
+					end
+					if not t._noReg then
+						for _, it in ipairs(t._items) do
+							local hay = it.IsGroup and string.lower(it.Disp or "") or it.Text
+							if hay and hay ~= "" and hay:find(k, 1, true) then
+								local e = it.Key and win._reg and win._reg[it.Key]
+								table.insert(res, { Title = e and e.Name or it.Disp or hay, Sub = t.Name, Run = function() win:Jump(it) end })
+							end
+						end
+					end
+				end
+			end
+			if #res == 0 then
+				New("TextLabel", {
+					Size = UDim2.new(1, 0, 0, 60), BackgroundTransparency = 1, Font = FONT.Medium, TextSize = 13,
+					TextColor3 = Theme.SubText, TextWrapped = true, Text = Library:T("empty", q), Parent = list,
+				})
+			end
+			for i = 1, math.min(#res, 30) do
+				local r = res[i]
+				local b = New("TextButton", {
+					Size = UDim2.new(1, 0, 0, 46), BackgroundColor3 = Theme.Card, BackgroundTransparency = win._cardT,
+					AutoButtonColor = false, Text = "", LayoutOrder = i, Parent = list,
+				}, { Corner(10), Stroke(Theme.Glow, 1, 0.72) })
+				for _, v in ipairs({ { r.Title, 5, 20, FONT.Semi, 13, Theme.Text }, { r.Sub, 25, 16, FONT.Regular, 11, Theme.SubText } }) do
+					New("TextLabel", {
+						BackgroundTransparency = 1, Position = UDim2.fromOffset(14, v[2]), Size = UDim2.new(1, -28, 0, v[3]),
+						Font = v[4], TextSize = v[5], TextColor3 = v[6], TextXAlignment = Enum.TextXAlignment.Left,
+						TextTruncate = Enum.TextTruncate.AtEnd, Text = tostring(v[1] or ""), Parent = b,
+					})
+				end
+				b.MouseButton1Click:Connect(function()
+					sb.Text = ""
+					SafeCall(r.Run)
+				end)
+			end
+			list.CanvasPosition = Vector2.zero
+			panel.Visible = true
+		end
+
+		local token = 0
+		self:_track(sb:GetPropertyChangedSignal("Text"):Connect(function()
+			token += 1
+			local m, q = token, sb.Text
+			if q == "" then return show(q) end
+			task.delay(0.12, function()
+				if m == token and win.Gui then show(sb.Text) end
+			end)
+		end))
+		self:_track(sb.FocusLost:Connect(function(enter)
+			local r = res[1]
+			if enter and panel.Visible and r then
+				sb.Text = ""
+				SafeCall(r.Run)
+			end
+		end))
+		chip.MouseButton1Click:Connect(function() win:SetGlobalSearch(not win._gsOn) end)
+		self._gs = { Panel = panel, Show = show, Paint = paint }
+		paint()
+	end
+
+	function Window:_buildSwipe()
+		local start
+		self:_track(UserInputService.InputBegan:Connect(function(i)
+			if i.UserInputType ~= Enum.UserInputType.Touch or not self._visible or self.SwipeTabs == false then return end
+			if self._closePopup or self._confirming or self._gs.Panel.Visible then return end
+			local p = Vector2.new(i.Position.X, i.Position.Y + GuiService:GetGuiInset().Y)
+			local ap, as = self._content.AbsolutePosition, self._content.AbsoluteSize
+			if p.X < ap.X or p.Y < ap.Y or p.X > ap.X + as.X or p.Y > ap.Y + as.Y then return end
+			start = { input = i, p = i.Position, t = os.clock(), cancel = false }
+		end))
+		self:_track(UserInputService.InputChanged:Connect(function(i)
+			if start and i == start.input and self._activeTab and not self._activeTab.Page.ScrollingEnabled then
+				start.cancel = true
+			end
+		end))
+		self:_track(UserInputService.InputEnded:Connect(function(i)
+			local s = start
+			if not s or i ~= s.input then return end
+			start = nil
+			if s.cancel then return end
+			local d = i.Position - s.p
+			if os.clock() - s.t > 0.6 or math.abs(d.X) < 90 or math.abs(d.X) < 2.2 * math.abs(d.Y) then return end
+			local idx = table.find(self._tabs, self._activeTab)
+			local nxt = idx and self._tabs[d.X < 0 and idx + 1 or idx - 1]
+			if nxt then self:_select(nxt) end
+		end))
+	end
+
+	local createP2 = Library.CreateWindow
+	function Library:CreateWindow(opts)
+		local win = createP2(self, opts)
+		if not win then return nil end
+		win._cmds, win._groups, win._subs = {}, {}, {}
+		win._gsOn = win:_load("gs", true) ~= false
+		win:_buildSearch()
+		win:_buildSwipe()
+
+		local function B(name, fn, kw) win:AddCommand({ Name = name, Callback = fn, Keywords = kw }) end
+		local names = {}
+		for n in pairs(Library.Presets or {}) do table.insert(names, n) end
+		table.sort(names)
+		for _, n in ipairs(names) do
+			B("Tema: " .. n, function() Library:SetTheme(n) end, "tema theme warna")
+		end		B("Simpan config", function()
+			local ok, e = win:SaveConfig("default")
+			win:Notify({ Title = ok and "Config disimpan" or "Gagal", Content = ok and "default" or tostring(e), Type = ok and "success" or "error" })
+		end, "save")
+		B("Muat config", function()
+			local ok, a = win:LoadConfig("default")
+			win:Notify({ Title = ok and "Config dimuat" or "Gagal", Content = ok and (tostring(a) .. " pengaturan") or tostring(a), Type = ok and "success" or "error" })
+		end, "load")
+		B("Sembunyikan UI", function() win:Toggle(false) end, "hide tutup")
+		B("Sidebar: ganti mode", function()
+			win:SetSidebar(({ full = "rail", rail = "hidden", hidden = "full" })[win._sbMode or "full"])
+		end, "rail")
+		B("Kunci/buka window", function() win:SetLocked(not win._locked) end, "lock")
+		for code, nm in pairs({ id = "Indonesia", en = "English" }) do
+			B("Bahasa: " .. nm, function()
+				Library.Lang = code
+				win:_store("lang", code)
+			end, "language")
+		end
+
+		win:Every(1, function()
+			local cnt = {}
+			for _, e in ipairs(win._regList or {}) do
+				if (e.Kind == "toggle" or e.Kind == "module") and e.Obj and e.Obj.Get and e.Tab then
+					local ok, v = pcall(e.Obj.Get, e.Obj)
+					if ok and v == true then
+						for _, t in ipairs(win._tabs) do
+							if t._auto and t._items == e.Tab._items then cnt[t] = (cnt[t] or 0) + 1 end
+						end
+					end
+				end
+			end
+			for _, t in ipairs(win._tabs) do
+				if t._auto then t:SetBadge(cnt[t]) end
+			end
+		end)
+		return win
 	end
 end
+--// ===== SELESAI P3 =====
 
 return Library
