@@ -6274,7 +6274,8 @@ do
 		return table.unpack(r, 2, r.n)
 	end
 
-	--// Panel notifikasi (Z8)	function Window:_ncRender()
+	--// Panel notifikasi (Z8)
+	function Window:_ncRender()
 		local L = self._ncList
 		if not L then return end
 		for _, c in ipairs(L:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
