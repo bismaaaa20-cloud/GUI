@@ -4605,6 +4605,8 @@ end
 
 --// ===== MULAI P1 (inti: Ticker, Registry, Bahasa, Storage, Ikon) =====
 do
+	--// Stub lama Window:_reg (bawaan library, tidak dipanggil di mana pun) bentrok dengan registry komponen.
+	Window._reg = nil
 	local function copy(t)
 		local o = {}
 		for k, v in pairs(t) do o[k] = v end
