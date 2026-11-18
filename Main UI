@@ -4738,7 +4738,8 @@ do
 	local function build(fn, parent, size, color)
 		local f = New("Frame", { Size = UDim2.fromOffset(size, size), BackgroundTransparency = 1, Parent = parent })
 		local th = 0.1
-		local px = math.max(1, size * th)		local function L(x1, y1, x2, y2)
+		local px = math.max(1, size * th)
+		local function L(x1, y1, x2, y2)
 			local dx, dy = x2 - x1, y2 - y1
 			New("Frame", {
 				AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale((x1 + x2) / 2, (y1 + y2) / 2),
@@ -5736,7 +5737,8 @@ do
 		table.sort(names)
 		for _, n in ipairs(names) do
 			B("Tema: " .. n, function() Library:SetTheme(n) end, "tema theme warna")
-		end		B("Simpan config", function()
+		end
+		B("Simpan config", function()
 			local ok, e = win:SaveConfig("default")
 			win:Notify({ Title = ok and "Config disimpan" or "Gagal", Content = ok and "default" or tostring(e), Type = ok and "success" or "error" })
 		end, "save")
@@ -6236,8 +6238,7 @@ do
 		if not b then return end
 		local n = 0
 		for _, x in ipairs(self._nh) do if not x.read then n += 1 end end
-		b.Visible, b.Text = n > 0, n > 99 and "99+" or tostring(n)
-	end
+		b.Visible, b.Text = n > 0, n > 99 and "99+" or tostring(n)	end
 
 	--// Riwayat dan Undo
 	local flagP = Window._flag
@@ -6776,7 +6777,8 @@ do
 				b.TextColor3 = on and Theme.Background or Theme.Text
 			end
 			bV.BackgroundColor3, bV.BackgroundTransparency = Theme.Secondary, win._fieldT
-			if vi then vi:Destroy() end			vi = Library.Icon(view == "grid" and "list" or "grid", bV, 16, Theme.SubText, true)
+			if vi then vi:Destroy() end
+			vi = Library.Icon(view == "grid" and "list" or "grid", bV, 16, Theme.SubText, true)
 		end
 		local function sortApply()
 			if sort then
@@ -7235,8 +7237,7 @@ do
 		local function show()
 			if #sel == 0 then
 				vt.Text = "-"
-				return
-			end
+				return			end
 			if not multi then
 				vt.Text = nameOf(sel[1])
 				return
@@ -7275,7 +7276,8 @@ do
 				end
 				table.sort(arr, function(a, b) return a.DisplayName:lower() < b.DisplayName:lower() end)
 				for i, p in ipairs(arr) do
-					local on = table.find(sel, p.UserId) ~= nil					local b = Btn(list, { Size = UDim2.new(1, 0, 0, 40), BackgroundTransparency = on and 0.2 or 1, BackgroundColor3 = on and Theme.Blue or Theme.Hover, LayoutOrder = i, ZIndex = 113 }, { Corner(8) })
+					local on = table.find(sel, p.UserId) ~= nil
+					local b = Btn(list, { Size = UDim2.new(1, 0, 0, 40), BackgroundTransparency = on and 0.2 or 1, BackgroundColor3 = on and Theme.Blue or Theme.Hover, LayoutOrder = i, ZIndex = 113 }, { Corner(8) })
 					New("ImageLabel", { Position = UDim2.fromOffset(6, 5), Size = UDim2.fromOffset(30, 30), BackgroundColor3 = Theme.Card, Image = string.format("rbxthumb://type=AvatarHeadShot&id=%d&w=48&h=48", p.UserId), ZIndex = 114, Parent = b }, { Corner(0, 1) })
 					Lbl(b, { Position = UDim2.fromOffset(44, 3), Size = UDim2.new(1, -52, 0, 18), Font = FONT.Semi, TextSize = 13, TextColor3 = Theme.Text, TextXAlignment = Enum.TextXAlignment.Left, Text = p.DisplayName, ZIndex = 114 })
 					Lbl(b, { Position = UDim2.fromOffset(44, 21), Size = UDim2.new(1, -52, 0, 14), TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left, Text = "@" .. p.Name, ZIndex = 114 })
@@ -7774,7 +7776,8 @@ do
 		all[name] = t
 		self:_store("themes", all)
 	end
-	function Window:SaveTheme(name)		name = tostring(name or ""):gsub("^%s+", ""):gsub("%s+$", "")
+	function Window:SaveTheme(name)
+		name = tostring(name or ""):gsub("^%s+", ""):gsub("%s+$", "")
 		if name == "" or #name > 24 then return false, "nama tidak valid" end
 		if name == "Dark Glass" or name == "Redz Blue" or name == "Classic" then return false, "nama dipakai tema bawaan" end
 		local t = { PanelT = self._panelT or 0.38, CardT = self._cardT, FieldT = self._fieldT }
