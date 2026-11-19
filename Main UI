@@ -8069,4 +8069,579 @@ do
 end
 --// ===== SELESAI P9 =====
 
+--// ===== MULAI P10 (gesture pintar: gulir vs geser, kunci eksklusif, anti kamera) =====
+do
+	local CAS = game:GetService("ContextActionService")
+	local OWN = setmetatable({}, { __mode = "k" }) -- input -> sesi pemilik
+	local locks = setmetatable({}, { __mode = "k" }) -- halaman -> kunci scroll aktif
+	local sinkN = 0
+	Library._gest = {}
+	Library:AddStrings("id", { dummyP10 = "" })
+
+	local function vec(p) return Vector2.new(p.X, p.Y) end
+	local function far(a, b, n)
+		return math.max(math.abs(a.X - b.X), math.abs(a.Y - b.Y)) >= n
+	end
+
+	--// Cegah kamera ikut berputar selama drag (sentuhan ditandai "sudah diproses")
+	local function sink(on)
+		if on then
+			sinkN += 1
+			if sinkN == 1 then
+				pcall(function()
+					CAS:BindActionAtPriority("XevoraSinkTouch", function() return Enum.ContextActionResult.Sink end, false, 3000, Enum.UserInputType.Touch)
+				end)
+			end
+		else
+			sinkN = math.max(0, sinkN - 1)
+			if sinkN == 0 then pcall(function() CAS:UnbindAction("XevoraSinkTouch") end) end
+		end
+	end
+
+	--// Kunci scroll berbasis penghitung (tidak bisa "lupa dipulihkan")
+	local function lock(page, key)
+		locks[page] = locks[page] or {}
+		locks[page][key] = true
+		page.ScrollingEnabled = false
+	end
+	local function unlock(page, key)
+		local l = locks[page]
+		if l then l[key] = nil end
+		if not l or next(l) == nil then page.ScrollingEnabled = true end
+	end
+
+	--// Pusat gesture per window: satu pemilik per sentuhan, satu sesi aktif sekaligus
+	function Window:_gestHub()
+		if self._gh then return self._gh end
+		local win = self
+		local hub = { sess = {} }
+		self._gh = hub
+		hub.moved = function(input)
+			for s in pairs(hub.sess) do
+				if (s.mouse and input.UserInputType == Enum.UserInputType.MouseMovement) or input == s.input then s.move(input) end
+			end
+		end
+		hub.ended = function(input)
+			for s in pairs(hub.sess) do
+				if (s.mouse and input.UserInputType == Enum.UserInputType.MouseButton1) or input == s.input then s.release("end") end
+			end
+		end
+		self:_track(UserInputService.InputChanged:Connect(function(input) hub.moved(input) end))
+		self:_track(UserInputService.InputEnded:Connect(function(input) hub.ended(input) end))
+		self:Every(0.25, function()
+			for s in pairs(hub.sess) do
+				if not s.mouse and s.input.UserInputState == Enum.UserInputState.End then s.release("lost") end
+			end
+			for _, t in ipairs(win._tabs) do
+				local l = locks[t.Page]
+				if t.Page.ScrollingEnabled == false and (not l or next(l) == nil) then t.Page.ScrollingEnabled = true end
+			end
+		end, true)
+		return hub
+	end
+
+	--// Gesture dengan deteksi niat. mode: "h" (slider), "free" (kotak warna), "hold" (batang warna)
+	function Library:Gesture(o)
+		local win, hit, page, mode = o.win, o.hit, o.page, o.mode or "h"
+		hit.Active = false
+		local hub = win:_gestHub()
+		local function begin(input)
+			if not IsPress(input) or OWN[input] then return false end
+			for other in pairs(hub.sess) do other.release("diganti") end
+			local s = { input = input, mouse = input.UserInputType == Enum.UserInputType.MouseButton1, t0 = os.clock() }
+			s.p0 = vec(input.Position)
+			s.cur = s.p0
+			OWN[input] = s
+			hub.sess[s] = true
+			local function engage()
+				if s.engaged or s.done then return end
+				s.engaged, s.locked, s.sunk = true, true, true
+				lock(page, s)
+				sink(true)
+				SafeCall(o.start, s.cur)
+			end
+			function s.release(why)
+				if s.done then return end
+				s.done = true
+				hub.sess[s] = nil
+				if OWN[input] == s then OWN[input] = nil end
+				if s.locked then unlock(page, s) end
+				if s.sunk then sink(false) end
+				if s.engaged then
+					SafeCall(o.finish, why)
+				elseif why == "end" and not s.scroll and o.tap ~= false and os.clock() - s.t0 < 0.4 then
+					SafeCall(o.start, s.cur)
+					SafeCall(o.finish, "tap")
+				end
+			end
+			function s.move(i)
+				local p = vec(i.Position)
+				s.cur = p
+				if s.engaged then return SafeCall(o.move, p) end
+				if s.scroll or s.done then return end
+				local d = p - s.p0
+				local ax, ay = math.abs(d.X), math.abs(d.Y)
+				if math.max(ax, ay) < 7 then return end
+				local held = os.clock() - s.t0
+				local horizontal = ax >= ay * 1.2
+				local ok
+				if mode == "h" then ok = horizontal
+				elseif mode == "free" then ok = horizontal or held >= 0.14
+				else ok = held >= 0.14 end
+				if ok then
+					engage()
+					SafeCall(o.move, p)
+				else
+					s.scroll = true -- niat menggulir: lepas kontrol, halaman tetap bisa digulir
+				end
+			end
+			if s.mouse then
+				engage()
+			else
+				task.delay(o.hold or 0.14, function()
+					if s.done or s.engaged or s.scroll then return end
+					if not far(s.cur, s.p0, 7) then engage() end
+				end)
+			end
+			return true
+		end
+		hit.InputBegan:Connect(begin)
+		Library._gest[#Library._gest + 1] = { id = o.id, hit = hit, page = page, begin = begin, win = win }
+	end
+
+	--// Tombol tekan/tahan yang tidak ikut menekan saat jari sedang menggulir
+	function Library:Press(o)
+		local win, hit = o.win, o.hit
+		hit.Active = false
+		local hub = win:_gestHub()
+		local function begin(input)
+			if not IsPress(input) or OWN[input] then return false end
+			local s = { input = input, mouse = input.UserInputType == Enum.UserInputType.MouseButton1, t0 = os.clock() }
+			s.p0 = vec(input.Position)
+			s.cur = s.p0
+			OWN[input] = s
+			hub.sess[s] = true
+			function s.move(i)
+				s.cur = vec(i.Position)
+				if far(s.cur, s.p0, 12) then s.cancel = true end
+			end
+			function s.release(why)
+				if s.done then return end
+				s.done = true
+				hub.sess[s] = nil
+				if OWN[input] == s then OWN[input] = nil end
+				if why == "end" and not s.cancel and not s.held and os.clock() - s.t0 < 0.4 then SafeCall(o.step, 1) end
+			end
+			task.delay(0.4, function()
+				if s.done or s.cancel then return end
+				s.held = true
+				local n = 0
+				while not s.done and not s.cancel and win.Gui do
+					n += 1
+					SafeCall(o.step, n > 12 and 5 or 1)
+					task.wait(0.08)
+				end
+			end)
+			return true
+		end
+		hit.InputBegan:Connect(begin)
+		Library._gest[#Library._gest + 1] = { id = o.id, hit = hit, begin = begin, win = win }
+	end
+
+	--// Geser window / HUD / tombol melayang: satu pemilik sentuhan, kamera tidak ikut
+	MakeDraggable = function(handle, target, track, onClick, getScale)
+		handle.Active = true
+		local drag
+		local function finish()
+			local s = drag
+			if not s then return end
+			drag = nil
+			if OWN[s.input] == s then OWN[s.input] = nil end
+			sink(false)
+			if onClick and s.moved < 6 then onClick() end
+		end
+		track(handle.InputBegan:Connect(function(input)
+			if not IsPress(input) or target:GetAttribute("XLocked") or OWN[input] then return end
+			if drag and drag.input.UserInputState == Enum.UserInputState.End then finish() end
+			if drag then return end
+			local s = { input = input, mouse = input.UserInputType == Enum.UserInputType.MouseButton1, start = input.Position, pos = target.Position, moved = 0 }
+			drag = s
+			OWN[input] = s
+			sink(true)
+			if input.Changed then
+				local conn
+				conn = input.Changed:Connect(function()
+					if input.UserInputState == Enum.UserInputState.End then
+						conn:Disconnect()
+						if drag == s then finish() end
+					end
+				end)
+			end
+		end))
+		track(UserInputService.InputChanged:Connect(function(input)
+			local s = drag
+			if not s or not ((s.mouse and input.UserInputType == Enum.UserInputType.MouseMovement) or input == s.input) then return end
+			local d = input.Position - s.start
+			s.moved = math.max(s.moved, math.sqrt(d.X * d.X + d.Y * d.Y))
+			local sc = getScale and getScale() or 1
+			target.Position = UDim2.new(s.pos.X.Scale, s.pos.X.Offset + d.X / sc, s.pos.Y.Scale, s.pos.Y.Offset + d.Y / sc)
+			ClampToScreen(target, getScale)
+		end))
+		track(UserInputService.InputEnded:Connect(function(input)
+			local s = drag
+			if s and (input == s.input or (s.mouse and input.UserInputType == Enum.UserInputType.MouseButton1)) then finish() end
+		end))
+	end
+
+	--// ===== Slider =====
+	function Tab:AddSlider(o)
+		o = o or {}
+		local window, page = self.Window, self.Page
+		local function fin(v, d)
+			local n = tonumber(v)
+			if not n or n ~= n or n == math.huge or n == -math.huge then return d end
+			return n
+		end
+		local mn, mx = fin(o.Min, 0), fin(o.Max, 100)
+		if mx < mn then mn, mx = mx, mn end
+		local inc = math.abs(fin(o.Increment, 1))
+		if inc < 0.0001 then inc = 1 end		local suffix, span = tostring(o.Suffix or ""), mx - mn
+		local function snap(v)
+			v = fin(v, mn)
+			if span <= 0 then return mn end
+			local sn = math.clamp(mn + math.floor((v - mn) / inc + 0.5) * inc, mn, mx)
+			return tonumber(string.format("%.4f", sn)) or mn
+		end
+		local value = snap(o.Default == nil and mn or o.Default)
+		local def = value
+		local row = self:_row(64, o.Name or "")
+		Lbl(row, { Position = UDim2.fromOffset(14, 9), Size = UDim2.new(1, -120, 0, 20), Font = FONT.Semi, TextSize = 14, TextColor3 = Theme.Text, TextXAlignment = Enum.TextXAlignment.Left, Text = tostring(o.Name or "Slider") })
+		local valLbl = Lbl(row, { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -14, 0, 9), Size = UDim2.fromOffset(100, 20), Font = FONT.Bold, TextSize = 13, TextColor3 = Theme.Cyan, TextXAlignment = Enum.TextXAlignment.Right, Text = "" })
+		local track = New("Frame", { Position = UDim2.fromOffset(14, 44), Size = UDim2.new(1, -28, 0, 6), BackgroundColor3 = Theme.Secondary, BackgroundTransparency = 0.1, BorderSizePixel = 0, Parent = row }, { Corner(0, 1) })
+		local fill = New("Frame", { Size = UDim2.fromScale(0, 1), BackgroundColor3 = Theme.Blue, BorderSizePixel = 0, Parent = track }, { Corner(0, 1) })
+		local thumb = New("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0, 0.5), Size = UDim2.fromOffset(18, 18), BackgroundColor3 = Theme.Soft, BorderSizePixel = 0, Parent = track }, { Corner(0, 1), Stroke(Theme.Blue, 2, 0) })
+		local hit = New("TextButton", { Position = UDim2.fromOffset(0, 24), Size = UDim2.new(1, 0, 0, 40), BackgroundTransparency = 1, Text = "", Parent = row })
+		local obj = {}
+		function obj:Set(v, silent)
+			value = snap(v)
+			local rel = span > 0 and math.clamp((value - mn) / span, 0, 1) or 0
+			fill.Size = UDim2.fromScale(rel, 1)
+			thumb.Position = UDim2.fromScale(rel, 0.5)
+			valLbl.Text = tostring(value) .. suffix
+			window:_flag(o.Flag, value)
+			if not silent then SafeCall(o.Callback, value) end
+		end
+		function obj:Get() return value end
+		local function fromX(x)
+			local w = math.max(track.AbsoluteSize.X, 1)
+			local nv = snap(mn + span * math.clamp((x - track.AbsolutePosition.X) / w, 0, 1))
+			if nv ~= value then obj:Set(nv) end
+		end
+		Library:Gesture({
+			id = o.Flag or o.Name, win = window, hit = hit, page = page, mode = "h",
+			start = function(p)
+				Tween(thumb, 0.12, { Size = UDim2.fromOffset(22, 22) })
+				fromX(p.X)
+			end,
+			move = function(p) fromX(p.X) end,
+			finish = function() Tween(thumb, 0.12, { Size = UDim2.fromOffset(18, 18) }) end,
+		})
+		--// ketuk angka untuk mengetik, ketuk dua kali untuk reset
+		local box = New("TextBox", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -14, 0, 5), Size = UDim2.fromOffset(92, 26), BackgroundColor3 = Theme.Secondary, BackgroundTransparency = 0.05, Font = FONT.Bold, TextSize = 13, TextColor3 = Theme.Cyan, ClearTextOnFocus = false, Text = "", Visible = false, ZIndex = 4, Parent = row }, { Corner(8), Stroke(Theme.Blue, 1, 0.3) })
+		local tap = Btn(row, { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -8, 0, 4), Size = UDim2.fromOffset(104, 28), ZIndex = 3 })
+		local last = 0
+		tap.MouseButton1Click:Connect(function()
+			local now = os.clock()
+			if now - last < 0.32 then
+				last = 0
+				box.Visible = false
+				box:ReleaseFocus()
+				obj:Set(def)
+				return
+			end
+			last = now
+			box.Text = tostring(obj:Get())
+			box.Visible = true
+			box:CaptureFocus()
+		end)
+		box.FocusLost:Connect(function()
+			local v = tonumber(box.Text)
+			box.Visible = false
+			if v then obj:Set(v) end
+		end)
+		obj:Set(value, true)
+		if o.Flag then
+			window:_registerFlag(o.Flag, function(v) obj:Set(v) end, function(v)
+				if type(v) ~= "number" or v ~= v or v == math.huge or v == -math.huge then return false, "harus angka" end
+				return true, v
+			end)
+		end
+		if o.FireOnInit ~= false then task.defer(SafeCall, o.Callback, value) end
+		return obj
+	end
+
+	--// ===== Range Slider =====
+	function Tab:AddRangeSlider(o)
+		o = o or {}
+		local win, page = self.Window, self.Page
+		local mn, mx = tonumber(o.Min) or 0, tonumber(o.Max) or 100
+		if mx < mn then mn, mx = mx, mn end
+		local inc = math.abs(tonumber(o.Increment) or 1)
+		if inc < 0.0001 then inc = 1 end
+		local span = mx - mn
+		local suffix = tostring(o.Suffix or "")
+		local function snap(v)
+			v = tonumber(v) or mn
+			if v ~= v then v = mn end
+			return tonumber(string.format("%.4f", math.clamp(mn + math.floor((v - mn) / inc + 0.5) * inc, mn, mx)))
+		end
+		local lo, hi = snap(o.DefaultMin == nil and mn or o.DefaultMin), snap(o.DefaultMax == nil and mx or o.DefaultMax)
+		if lo > hi then lo, hi = hi, lo end
+		local row = self:_row(64, o.Name or "")
+		Lbl(row, { Position = UDim2.fromOffset(14, 9), Size = UDim2.new(1, -150, 0, 20), Font = FONT.Semi, TextSize = 14, TextColor3 = Theme.Text, TextXAlignment = Enum.TextXAlignment.Left, Text = tostring(o.Name or "Range") })
+		local vl = Lbl(row, { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -14, 0, 9), Size = UDim2.fromOffset(130, 20), Font = FONT.Bold, TextSize = 13, TextColor3 = Theme.Cyan, TextXAlignment = Enum.TextXAlignment.Right })
+		local track = New("Frame", { Position = UDim2.fromOffset(14, 44), Size = UDim2.new(1, -28, 0, 6), BackgroundColor3 = Theme.Secondary, BackgroundTransparency = 0.1, BorderSizePixel = 0, Parent = row }, { Corner(0, 1) })
+		local fill = New("Frame", { BackgroundColor3 = Theme.Blue, BorderSizePixel = 0, Size = UDim2.fromScale(0, 1), Parent = track }, { Corner(0, 1) })
+		local function thumb()
+			return New("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(18, 18), BackgroundColor3 = Theme.Soft, BorderSizePixel = 0, Parent = track }, { Corner(0, 1), Stroke(Theme.Blue, 2, 0) })
+		end
+		local t1, t2 = thumb(), thumb()
+		local hit = Btn(row, { Position = UDim2.fromOffset(0, 24), Size = UDim2.new(1, 0, 0, 40) })
+		local obj = {}
+		local function rel(v) return span > 0 and (v - mn) / span or 0 end
+		local function render()
+			local a, b = rel(lo), rel(hi)
+			fill.Position, fill.Size = UDim2.fromScale(a, 0), UDim2.fromScale(b - a, 1)
+			t1.Position, t2.Position = UDim2.fromScale(a, 0.5), UDim2.fromScale(b, 0.5)
+			vl.Text = Library:T("range", lo .. suffix, hi .. suffix)
+		end
+		function obj:Get() return { lo, hi } end
+		function obj:GetRange() return lo, hi end
+		function obj:Set(a, b, silent)
+			if type(a) == "table" then a, b, silent = a[1], a[2], b end
+			a, b = snap(a), snap(b == nil and hi or b)
+			if a > b then a, b = b, a end
+			lo, hi = a, b
+			render()
+			win:_flag(o.Flag, { lo, hi })
+			if not silent then SafeCall(o.Callback, lo, hi) end
+		end
+		local which
+		local function fromX(x)
+			local w = math.max(track.AbsoluteSize.X, 1)
+			local v = snap(mn + span * math.clamp((x - track.AbsolutePosition.X) / w, 0, 1))
+			if which == 1 then obj:Set(math.min(v, hi), hi) else obj:Set(lo, math.max(v, lo)) end
+		end
+		Library:Gesture({
+			id = o.Flag or o.Name, win = win, hit = hit, page = page, mode = "h",
+			start = function(p)
+				local w = math.max(track.AbsoluteSize.X, 1)
+				local r = math.clamp((p.X - track.AbsolutePosition.X) / w, 0, 1)
+				if lo == hi then which = r >= rel(lo) and 2 or 1
+				else which = math.abs(r - rel(lo)) <= math.abs(r - rel(hi)) and 1 or 2 end
+				fromX(p.X)
+			end,
+			move = function(p) fromX(p.X) end,
+		})
+		if o.Flag then
+			win:_registerFlag(o.Flag, function(v) obj:Set(v) end, function(v)
+				if type(v) ~= "table" or type(v[1]) ~= "number" or type(v[2]) ~= "number" then return false, "harus [min,maks]" end
+				return true, v
+			end)
+		end
+		obj:Set(lo, hi, true)
+		if o.FireOnInit == true then task.defer(SafeCall, o.Callback, lo, hi) end
+		return obj
+	end
+
+	--// ===== Stepper =====
+	function Tab:AddStepper(o)
+		o = o or {}
+		local win = self.Window
+		local mn, mx = tonumber(o.Min) or 0, tonumber(o.Max) or 100
+		if mx < mn then mn, mx = mx, mn end
+		local st = math.abs(tonumber(o.Step) or 1)
+		if st <= 0 then st = 1 end
+		local function snap(v)
+			v = math.clamp(mn + math.floor(((tonumber(v) or mn) - mn) / st + 0.5) * st, mn, mx)
+			return tonumber(string.format("%.4f", v))
+		end
+		local val = snap(o.Default == nil and mn or o.Default)
+		local row = self:_row(52, o.Name or "")
+		self:_title(row, o.Name or "Stepper", nil, -150)
+		local g = New("Frame", { AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -12, 0.5, 0), Size = UDim2.fromOffset(124, 34), BackgroundTransparency = 1, Parent = row })
+		local function mk(t, x)
+			return Btn(g, { Position = UDim2.fromOffset(x, 0), Size = UDim2.fromOffset(32, 34), BackgroundTransparency = 0, BackgroundColor3 = Theme.Secondary, Text = t, TextSize = 18 }, { Corner(9), Stroke(Theme.Glow, 1, 0.65) })
+		end
+		local minus, plus = mk("-", 0), mk("+", 92)
+		local box = New("TextBox", { Position = UDim2.fromOffset(34, 0), Size = UDim2.fromOffset(56, 34), BackgroundTransparency = 1, Font = FONT.Bold, TextSize = 14, TextColor3 = Theme.Cyan, ClearTextOnFocus = false, Text = "", Parent = g })
+		local obj = {}
+		function obj:Get() return val end
+		function obj:Set(v, silent)
+			val = snap(v)
+			box.Text = tostring(val)
+			win:_flag(o.Flag, val)
+			if not silent then SafeCall(o.Callback, val) end
+		end
+		local id = o.Flag or o.Name
+		Library:Press({ id = tostring(id) .. ":-", win = win, hit = minus, step = function(m) obj:Set(val - st * m) end })
+		Library:Press({ id = tostring(id) .. ":+", win = win, hit = plus, step = function(m) obj:Set(val + st * m) end })
+		box.FocusLost:Connect(function()
+			if tonumber(box.Text) then obj:Set(box.Text) else box.Text = tostring(val) end
+		end)
+		if o.Flag then
+			win:_registerFlag(o.Flag, function(v) obj:Set(v) end, function(v)
+				if type(v) ~= "number" or v ~= v or v == math.huge or v == -math.huge then return false, "harus angka" end
+				return true, v
+			end)
+		end
+		obj:Set(val, true)
+		if o.FireOnInit == true then task.defer(SafeCall, o.Callback, val) end
+		return obj
+	end
+
+	--// ===== Pemilih warna =====
+	function Tab:AddColorPicker(o)
+		o = o or {}
+		local window, page = self.Window, self.Page
+		local h, s, v = 0, 0, 1
+		local CLOSED, OPEN = 52, 220
+		local function hex(c)
+			return string.format("%02X%02X%02X", math.round(c.R * 255), math.round(c.G * 255), math.round(c.B * 255))
+		end
+		local row = self:_row(CLOSED, o.Name or "Color")
+		row.ClipsDescendants = true
+		New("TextLabel", {
+			BackgroundTransparency = 1, Position = UDim2.fromOffset(14, 0), Size = UDim2.new(1, -76, 0, CLOSED),
+			Font = FONT.Semi, TextSize = 14, TextColor3 = Theme.Text, TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd, Text = tostring(o.Name or "Color"), Parent = row,
+		})
+		local chip = New("Frame", {
+			AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -14, 0, 13), Size = UDim2.fromOffset(46, 26),
+			BorderSizePixel = 0, Parent = row,
+		}, { Corner(8), Stroke(Theme.Glow, 1, 0.4) })
+		local head = New("TextButton", { Size = UDim2.new(1, 0, 0, CLOSED), BackgroundTransparency = 1, Text = "", Parent = row })
+		Pressable(head, row, Theme.Card, Theme.Hover)
+		local sv = New("Frame", {
+			Position = UDim2.fromOffset(14, 60), Size = UDim2.new(1, -62, 0, 112), BorderSizePixel = 0, Parent = row,
+		}, {
+			Corner(8),
+			New("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 }, {
+				Corner(8), New("UIGradient", { Transparency = NumberSequence.new(0, 1) }),
+			}),
+			New("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0), BorderSizePixel = 0 }, {
+				Corner(8), New("UIGradient", { Rotation = 90, Transparency = NumberSequence.new(1, 0) }),
+			}),
+		})
+		local svCur = New("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(12, 12), BackgroundTransparency = 1,
+			BorderSizePixel = 0, ZIndex = 2, Parent = sv,
+		}, { Corner(0, 1), Stroke(Color3.new(1, 1, 1), 2, 0) })
+		local svHit = New("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", ZIndex = 3, Parent = sv })
+		local hue = New("Frame", {
+			AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -14, 0, 60), Size = UDim2.fromOffset(22, 112),
+			BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, Parent = row,
+		}, {
+			Corner(8),
+			New("UIGradient", { Rotation = 90, Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, Color3.fromHSV(0, 1, 1)),
+				ColorSequenceKeypoint.new(0.167, Color3.fromHSV(0.167, 1, 1)),
+				ColorSequenceKeypoint.new(0.333, Color3.fromHSV(0.333, 1, 1)),
+				ColorSequenceKeypoint.new(0.5, Color3.fromHSV(0.5, 1, 1)),
+				ColorSequenceKeypoint.new(0.667, Color3.fromHSV(0.667, 1, 1)),
+				ColorSequenceKeypoint.new(0.833, Color3.fromHSV(0.833, 1, 1)),
+				ColorSequenceKeypoint.new(1, Color3.fromHSV(0, 1, 1)),
+			}) }),
+		})
+		local hueCur = New("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0), Size = UDim2.new(1, 4, 0, 4),			BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, ZIndex = 2, Parent = hue,
+		}, { Corner(2), Stroke(Color3.new(0, 0, 0), 1, 0.3) })
+		local hueHit = New("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", ZIndex = 3, Parent = hue })
+		local box = New("TextBox", {
+			Position = UDim2.fromOffset(14, 180), Size = UDim2.new(1, -28, 0, 30), BackgroundColor3 = Theme.Secondary,
+			BackgroundTransparency = window._fieldT, Font = FONT.Medium, TextSize = 13, TextColor3 = Theme.Text,
+			PlaceholderText = "#RRGGBB", PlaceholderColor3 = Theme.SubText, ClearTextOnFocus = false, Text = "", Parent = row,
+		}, { Corner(9), Pad(12, 0, 12, 0), Stroke(Theme.Glow, 1, 0.65) })
+
+		local obj = {}
+		local function apply(silent)
+			local c = Color3.fromHSV(h, s, v)
+			sv.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
+			svCur.Position = UDim2.fromScale(s, 1 - v)
+			hueCur.Position = UDim2.fromScale(0.5, h)
+			chip.BackgroundColor3 = c
+			if not box:IsFocused() then box.Text = "#" .. hex(c) end
+			window:_flag(o.Flag, hex(c))
+			if not silent then SafeCall(o.Callback, c) end
+		end
+		function obj:Get() return Color3.fromHSV(h, s, v) end
+		function obj:Set(c, silent)
+			if typeof(c) ~= "Color3" then return end
+			h, s, v = c:ToHSV()
+			apply(silent)
+		end
+		local GuiService = game:GetService("GuiService")
+		local function py(pos) return pos.Y + GuiService:GetGuiInset().Y end
+		local function fromSV(pos)
+			local ap, as = sv.AbsolutePosition, sv.AbsoluteSize
+			s = math.clamp((pos.X - ap.X) / math.max(as.X, 1), 0, 1)
+			v = 1 - math.clamp((py(pos) - ap.Y) / math.max(as.Y, 1), 0, 1)
+			apply(false)
+		end
+		local function fromHue(pos)
+			local ap, as = hue.AbsolutePosition, hue.AbsoluteSize
+			h = math.clamp((py(pos) - ap.Y) / math.max(as.Y, 1), 0, 0.999)
+			apply(false)
+		end
+		local id = tostring(o.Flag or o.Name or "color")
+		Library:Gesture({ id = id .. ":sv", win = window, hit = svHit, page = page, mode = "free", start = fromSV, move = fromSV })
+		Library:Gesture({ id = id .. ":hue", win = window, hit = hueHit, page = page, mode = "hold", start = fromHue, move = fromHue })
+		local open = false
+		head.MouseButton1Click:Connect(function()
+			open = not open
+			Tween(row, 0.16, { Size = UDim2.new(1, 0, 0, open and OPEN or CLOSED) })
+		end)
+		box.FocusLost:Connect(function()
+			local t = box.Text:gsub("[#%s]", "")
+			if #t == 6 and tonumber(t, 16) then obj:Set(Color3.fromHex("#" .. t)) else apply(true) end
+		end)
+		if o.Flag then
+			window:_registerFlag(o.Flag, function(x) obj:Set(Color3.fromHex("#" .. tostring(x):gsub("#", ""))) end, function(x)
+				if type(x) ~= "string" then return false, "harus hex" end
+				local t = x:gsub("#", "")
+				if #t ~= 6 or not tonumber(t, 16) then return false, "hex tidak valid" end
+				return true, t
+			end)
+		end
+		obj:Set(typeof(o.Default) == "Color3" and o.Default or Color3.new(1, 1, 1), true)
+		if o.FireOnInit == true or (o.Default ~= nil and o.FireOnInit ~= false) then task.defer(SafeCall, o.Callback, obj:Get()) end
+		return obj
+	end
+
+	--// Daftarkan ulang ke registry (fungsi di atas menggantikan versi lama)
+	for name, kind in pairs({ AddSlider = "slider", AddRangeSlider = "slider", AddStepper = "stepper", AddColorPicker = "color" }) do
+		if Library._dec then Library._dec[name] = nil end
+		Library:_decorate(name, kind)
+	end
+
+	--// Window: anti kamera dan pemulihan scroll
+	local selP = Window._select
+	function Window:_select(tab)
+		selP(self, tab)
+		local l = locks[tab.Page]
+		if tab.Page.ScrollingEnabled == false and (not l or next(l) == nil) then tab.Page.ScrollingEnabled = true end
+	end
+
+	local createP = Library.CreateWindow
+	function Library:CreateWindow(o)
+		local win = createP(self, o)
+		if not win then return nil end
+		win.Root.Active = true
+		win.Main.Active = true
+		win:_gestHub()
+		return win
+	end
+end
+--// ===== SELESAI P10 =====
+
 return Library
