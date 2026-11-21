@@ -8072,10 +8072,12 @@ end
 --// ===== MULAI P10 (gesture pintar: gulir vs geser, kunci eksklusif, anti kamera) =====
 do
 	local CAS = game:GetService("ContextActionService")
+	local GuiService = game:GetService("GuiService")
 	local OWN = setmetatable({}, { __mode = "k" }) -- input -> sesi pemilik
 	local locks = setmetatable({}, { __mode = "k" }) -- halaman -> kunci scroll aktif
 	local sinkN = 0
 	Library._gest = {}
+	Library._cal = { a = 0, b = 0 } -- bukti: posisi sentuh sudah termasuk inset (a) atau belum (b)
 	Library:AddStrings("id", { dummyP10 = "" })
 
 	local function vec(p) return Vector2.new(p.X, p.Y) end
@@ -8140,6 +8142,24 @@ do
 		return hub
 	end
 
+	--// Posisi sentuh vs koordinat layar: konvensi inset berbeda antar versi/executor.
+	--// Sentuhan pasti berada di dalam kotak yang ditekan, jadi kandidat yang cocok dipilih (dan dipelajari).
+	local function learn(hit, p)
+		local c, inset = Library._cal, GuiService:GetGuiInset().Y
+		local ap, as = hit.AbsolutePosition, hit.AbsoluteSize
+		local inA = p.Y >= ap.Y and p.Y <= ap.Y + as.Y
+		local inB = p.Y + inset >= ap.Y and p.Y + inset <= ap.Y + as.Y
+		if inset > 0 and inA ~= inB then
+			if inA then c.a += 1 else c.b += 1 end
+			return inA and 0 or inset
+		end
+		return (c.b > c.a) and inset or 0
+	end
+	function Library._yOff()
+		local c = Library._cal
+		return (c.b > c.a) and GuiService:GetGuiInset().Y or 0
+	end
+
 	--// Gesture dengan deteksi niat. mode: "h" (slider), "free" (kotak warna), "hold" (batang warna)
 	function Library:Gesture(o)
 		local win, hit, page, mode = o.win, o.hit, o.page, o.mode or "h"
@@ -8151,6 +8171,8 @@ do
 			local s = { input = input, mouse = input.UserInputType == Enum.UserInputType.MouseButton1, t0 = os.clock() }
 			s.p0 = vec(input.Position)
 			s.cur = s.p0
+			s.k = learn(hit, s.p0)
+			local function adj(p) return Vector2.new(p.X, p.Y + s.k) end
 			OWN[input] = s
 			hub.sess[s] = true
 			local function engage()
@@ -8158,7 +8180,7 @@ do
 				s.engaged, s.locked, s.sunk = true, true, true
 				lock(page, s)
 				sink(true)
-				SafeCall(o.start, s.cur)
+				SafeCall(o.start, adj(s.cur))
 			end
 			function s.release(why)
 				if s.done then return end
@@ -8170,14 +8192,14 @@ do
 				if s.engaged then
 					SafeCall(o.finish, why)
 				elseif why == "end" and not s.scroll and o.tap ~= false and os.clock() - s.t0 < 0.4 then
-					SafeCall(o.start, s.cur)
+					SafeCall(o.start, adj(s.cur))
 					SafeCall(o.finish, "tap")
 				end
 			end
 			function s.move(i)
 				local p = vec(i.Position)
 				s.cur = p
-				if s.engaged then return SafeCall(o.move, p) end
+				if s.engaged then return SafeCall(o.move, adj(p)) end
 				if s.scroll or s.done then return end
 				local d = p - s.p0
 				local ax, ay = math.abs(d.X), math.abs(d.Y)
@@ -8190,7 +8212,7 @@ do
 				else ok = held >= 0.14 end
 				if ok then
 					engage()
-					SafeCall(o.move, p)
+					SafeCall(o.move, adj(p))
 				else
 					s.scroll = true -- niat menggulir: lepas kontrol, halaman tetap bisa digulir
 				end
@@ -8305,7 +8327,8 @@ do
 		local mn, mx = fin(o.Min, 0), fin(o.Max, 100)
 		if mx < mn then mn, mx = mx, mn end
 		local inc = math.abs(fin(o.Increment, 1))
-		if inc < 0.0001 then inc = 1 end		local suffix, span = tostring(o.Suffix or ""), mx - mn
+		if inc < 0.0001 then inc = 1 end
+		local suffix, span = tostring(o.Suffix or ""), mx - mn
 		local function snap(v)
 			v = fin(v, mn)
 			if span <= 0 then return mn end
@@ -8554,7 +8577,8 @@ do
 			}) }),
 		})
 		local hueCur = New("Frame", {
-			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0), Size = UDim2.new(1, 4, 0, 4),			BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, ZIndex = 2, Parent = hue,
+			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0), Size = UDim2.new(1, 4, 0, 4),
+			BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, ZIndex = 2, Parent = hue,
 		}, { Corner(2), Stroke(Color3.new(0, 0, 0), 1, 0.3) })
 		local hueHit = New("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", ZIndex = 3, Parent = hue })
 		local box = New("TextBox", {
@@ -8580,8 +8604,7 @@ do
 			h, s, v = c:ToHSV()
 			apply(silent)
 		end
-		local GuiService = game:GetService("GuiService")
-		local function py(pos) return pos.Y + GuiService:GetGuiInset().Y end
+		local function py(pos) return pos.Y end -- Gesture sudah mengoreksi inset
 		local function fromSV(pos)
 			local ap, as = sv.AbsolutePosition, sv.AbsoluteSize
 			s = math.clamp((pos.X - ap.X) / math.max(as.X, 1), 0, 1)
@@ -8624,6 +8647,70 @@ do
 		Library:_decorate(name, kind)
 	end
 
+	--// Batas geser window: boleh naik melewati tepi atas (sisakan strip header agar tetap bisa diraih)
+	local function clampDelta(px, py, sx, sy, ax, ay, aw, ah, sc)
+		local dx, dy = 0, 0
+		local keepTop = 44 * sc
+		if px > ax + aw - 80 then dx = (ax + aw - 80) - px
+		elseif px + sx < ax + 80 then dx = (ax + 80) - (px + sx) end
+		local minY = ay - (sy - keepTop)
+		if py < minY then dy = minY - py
+		elseif py > ay + ah - 50 then dy = (ay + ah - 50) - py end
+		return dx, dy
+	end
+	Library._clampDelta = clampDelta
+	ClampToScreen = function(frame, getScale)
+		local cam = workspace.CurrentCamera
+		if not cam then return end
+		local pos, size = frame.AbsolutePosition, frame.AbsoluteSize
+		if size.X < 10 or size.Y < 10 then return end
+		local ax, ay, aw, ah = 0, 0, cam.ViewportSize.X, cam.ViewportSize.Y
+		local g = frame.Parent
+		while g and not g:IsA("ScreenGui") do g = g.Parent end
+		if g and g.AbsoluteSize.X > 10 and g.AbsoluteSize.Y > 10 then
+			ax, ay, aw, ah = g.AbsolutePosition.X, g.AbsolutePosition.Y, g.AbsoluteSize.X, g.AbsoluteSize.Y
+		end
+		local sc = getScale and getScale() or 1
+		local dx, dy = clampDelta(pos.X, pos.Y, size.X, size.Y, ax, ay, aw, ah, sc)
+		if dx ~= 0 or dy ~= 0 then
+			local p = frame.Position
+			frame.Position = UDim2.new(p.X.Scale, p.X.Offset + dx / sc, p.Y.Scale, p.Y.Offset + dy / sc)
+		end
+	end
+
+	function Window:ResetPosition()
+		self.Root.Position = UDim2.fromScale(0.5, 0.5)
+		self:_store("pos", nil)
+		self._lastPos = nil
+	end
+
+	--// Swipe tab: koreksi inset memakai hasil kalibrasi yang sama
+	function Window:_buildSwipe()
+		local start
+		self:_track(UserInputService.InputBegan:Connect(function(i)
+			if i.UserInputType ~= Enum.UserInputType.Touch or not self._visible or self.SwipeTabs == false then return end
+			if self._closePopup or self._confirming or self._gs.Panel.Visible then return end
+			local p = Vector2.new(i.Position.X, i.Position.Y + Library._yOff())
+			local ap, as = self._content.AbsolutePosition, self._content.AbsoluteSize
+			if p.X < ap.X or p.Y < ap.Y or p.X > ap.X + as.X or p.Y > ap.Y + as.Y then return end
+			start = { input = i, p = i.Position, t = os.clock(), cancel = false }
+		end))
+		self:_track(UserInputService.InputChanged:Connect(function(i)
+			if start and i == start.input and self._activeTab and not self._activeTab.Page.ScrollingEnabled then start.cancel = true end
+		end))
+		self:_track(UserInputService.InputEnded:Connect(function(i)
+			local s = start
+			if not s or i ~= s.input then return end
+			start = nil
+			if s.cancel then return end
+			local d = i.Position - s.p
+			if os.clock() - s.t > 0.6 or math.abs(d.X) < 90 or math.abs(d.X) < 2.2 * math.abs(d.Y) then return end
+			local idx = table.find(self._tabs, self._activeTab)
+			local nxt = idx and self._tabs[d.X < 0 and idx + 1 or idx - 1]
+			if nxt then self:_select(nxt) end
+		end))
+	end
+
 	--// Window: anti kamera dan pemulihan scroll
 	local selP = Window._select
 	function Window:_select(tab)
@@ -8639,9 +8726,16 @@ do
 		win.Root.Active = true
 		win.Main.Active = true
 		win:_gestHub()
+		--// pegangan geser kedua di status bar (bawah), supaya window bisa ditarik naik tanpa jari masuk area tombol Roblox
+		if win.Zones and win.Zones.Status then
+			MakeDraggable(win.Zones.Status, win.Root, function(c) return win:_track(c) end, nil, function() return win._scale.Scale end)
+		end
+		win:AddCommand({ Name = "Reset posisi window", Callback = function() win:ResetPosition() end, Keywords = "posisi tengah geser" })
 		return win
 	end
 end
 --// ===== SELESAI P10 =====
+
+
 
 return Library
