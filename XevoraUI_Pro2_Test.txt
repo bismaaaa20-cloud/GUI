@@ -1,4 +1,4 @@
-XEVORAUI PRO2 — SCRIPT TES v4 (43 TES OTOMATIS)
+XEVORAUI PRO2 — SCRIPT TES v5 (46 TES OTOMATIS)
 Jalankan terpisah di Delta. Jangan tempel ke Main UI.
 
 --// ===== MULAI TES =====
@@ -50,7 +50,7 @@ end
 local hasil = win:AddTab({ Name = "Hasil", Icon = "check" })
 stats = hasil:AddStats({ { Value = "0", Label = "Lulus" }, { Value = "0", Label = "Gagal" }, { Value = "0", Label = "Lewat" } })
 ringT = hasil:AddRing({ Name = "Tingkat lulus", Value = 0, Max = 100 })
-hasil:AddButton({ Name = "Jalankan tes otomatis", Desc = "Semua paket P0 sampai P9", Text = "Mulai", Callback = function() runTests() end })
+hasil:AddButton({ Name = "Jalankan tes otomatis", Desc = "Semua paket P0 sampai P10", Text = "Mulai", Callback = function() runTests() end })
 con = hasil:AddConsole({ Name = "Log tes", Height = 220 })
 hasil:AddToggle({ Name = "Pemicu error (uji)", Desc = "Callback sengaja error", Flag = "t_err", Callback = function(v) if v then error("galat uji disengaja") end end })
 
@@ -132,8 +132,7 @@ local function stop(i)
 end
 local function origin(g)
 	local ap, as = g.hit.AbsolutePosition, g.hit.AbsoluteSize
-	local inset = game:GetService("GuiService"):GetGuiInset().Y
-	return ap.X + as.X * 0.25, ap.Y + as.Y * 0.5 - inset, as.X * 0.5
+	return ap.X + as.X * 0.25, ap.Y + as.Y * 0.5, as.X * 0.5
 end
 local RUNB = { Text = "Tes berjalan, jangan sentuh layar sekitar 40 detik", Kind = "warn", Dismissible = false }
 
@@ -191,7 +190,8 @@ runTests = function()
 		assert(win._zv.Banner == false)
 		win:SetBanner(RUNB)
 		win:SetStatus("tes status", 1)
-	end)	check("P2 sidebar dan kunci", function()
+	end)
+	check("P2 sidebar dan kunci", function()
 		local m0 = win._sbMode
 		for _, m in ipairs({ "rail", "hidden", "full" }) do
 			win:SetSidebar(m)
@@ -390,7 +390,8 @@ runTests = function()
 		assert(win.Flags.t_slider ~= 10, "nilai tidak berubah")
 		stop(i)
 		assert(g.page.ScrollingEnabled == true, "scroll tidak pulih")
-	end)	check("G3 dua slider berurutan: hanya yang disentuh berubah", function()
+	end)
+	check("G3 dua slider berurutan: hanya yang disentuh berubah", function()
 		local g = G("t_slider")
 		assert(G("t_slider2"), "slider kedua tidak ada")
 		win:SetFlag("t_slider", 20)
@@ -491,6 +492,42 @@ runTests = function()
 		stop(h)
 		assert(step:Get() > 8, "tahan tidak mengulang")
 		step:Set(5, true)
+	end)
+	check("G9 warna: titik sentuh = titik yang terpilih", function()
+		local g = G("t_color:sv")
+		assert(g, "gesture warna tidak ada")
+		local before = picker:Get()
+		local ap, as = g.hit.AbsolutePosition, g.hit.AbsoluteSize
+		for _, frac in ipairs({ 0.25, 0.5, 0.75 }) do
+			Library._cal.a, Library._cal.b = 0, 0
+			local i = fi("Touch", ap.X + as.X * 0.5, ap.Y + as.Y * frac)
+			g.begin(i)
+			task.wait(0.3)
+			local _, _, v = picker:Get():ToHSV()
+			stop(i)
+			assert(math.abs(v - (1 - frac)) < 0.12, string.format("sentuh di %d%% tinggi kotak, kecerahan %.2f (harus ~%.2f)", frac * 100, v, 1 - frac))
+		end
+		Library._cal.a, Library._cal.b = 0, 0
+		picker:Set(before, true)
+	end)
+	check("G10 batas geser: window boleh naik ke atas layar", function()
+		local cd = Library._clampDelta
+		assert(cd, "Library._clampDelta tidak ada")
+		local sc, sy = win._scale.Scale, 300
+		local _, dy = cd(100, -(sy - 44 * sc) + 5, 400, sy, 0, 0, 800, 400, sc)
+		assert(dy == 0, "window dilarang naik padahal masih di dalam batas baru")
+		_, dy = cd(100, -sy, 400, sy, 0, 0, 800, 400, sc)
+		assert(dy > 0, "window tidak ditarik kembali saat terlalu jauh ke atas")
+		_, dy = cd(100, -30, 400, sy, 0, 0, 800, 400, sc)
+		assert(dy == 0, "batas lama masih menahan di dekat tepi atas")
+		_, dy = cd(100, 390, 400, sy, 0, 0, 800, 400, sc)
+		assert(dy < 0, "window tidak ditarik kembali saat terlalu jauh ke bawah")
+	end)
+	check("G11 pegangan geser ganda dan reset posisi", function()
+		assert(win.Zones.Status.Active == true, "status bar bukan pegangan geser")
+		win.Root.Position = UDim2.new(0.5, 30, 0.5, -40)
+		win:ResetPosition()
+		assert(win.Root.Position == UDim2.fromScale(0.5, 0.5), "reset posisi gagal")
 	end)
 	check("P9 ekspor dan impor config", function()
 		win:SetFlag("t_slider", 33)
