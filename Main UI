@@ -8858,4 +8858,291 @@ do
 end
 --// ===== SELESAI P11V =====
 
+--// ===== MULAI P12 (Pengaturan UI: gear + desain custom bergambar) =====
+do
+	local DEF = { mode = "default", src = "", vis = 60, dim = 35, fit = "Crop" }
+	local FITS = { Crop = Enum.ScaleType.Crop, Fit = Enum.ScaleType.Fit, Stretch = Enum.ScaleType.Stretch }
+	local FIT_ORDER = { "Crop", "Fit", "Stretch" }
+	local GEARW, GAP = 28, 8
+
+	Library:AddStrings("id", {
+		uiSet = "Pengaturan UI", dsgn = "Ganti Desain", dDef = "Bawaan", dCus = "Custom",
+		imgLbl = "Gambar latar", imgPh = "ID asset, URL gambar, atau nama file", apply = "Terapkan", clear = "Hapus",
+		vis = "Kejelasan gambar", dim = "Gelapkan gambar", fit = "Mode gambar", rst = "Reset desain",
+		imgOk = "Gambar diterapkan", imgBad = "Gambar tidak bisa dimuat",
+		imgNoUrl = "Executor tidak mendukung unduh URL. Pakai ID asset.", imgEmpty = "Isi gambar dulu",
+	})
+	Library:AddStrings("en", {
+		uiSet = "UI Settings", dsgn = "Change Design", dDef = "Default", dCus = "Custom",
+		imgLbl = "Background image", imgPh = "Asset ID, image URL, or file name", apply = "Apply", clear = "Clear",
+		vis = "Image visibility", dim = "Darken image", fit = "Image mode", rst = "Reset design",
+		imgOk = "Image applied", imgBad = "Image could not be loaded",
+		imgNoUrl = "Executor cannot download URLs. Use an asset ID.", imgEmpty = "Enter an image first",
+	})
+
+	local function trim(v)
+		return (tostring(v or ""):gsub("^%s+", ""):gsub("%s+$", ""))
+	end
+
+	local function resolve(src, cb)
+		local low = src:lower()
+		if src:match("^%d+$") or low:match("^rbxassetid://") or low:match("^rbxasset://")
+			or low:match("^https?://www%.roblox%.com/asset") then
+			cb(ToAsset(src))
+			return true
+		end
+		if low:match("^https?://") then
+			if not LoadIconFromUrl(src, cb) then return false, "url" end
+			return true
+		end
+		if customAssetFn and typeof(isfile) == "function" then
+			local ok, exists = pcall(isfile, src)
+			if ok and exists then
+				local ok2, asset = pcall(customAssetFn, src)
+				if ok2 and asset then cb(asset); return true end
+			end
+		end
+		return false, "file"
+	end
+
+	function Window:_dzNote(key, kind)
+		pcall(self.Notify, self, { Title = Library:T("uiSet"), Content = Library:T(key), Type = kind or "info", Duration = 3, Dedupe = true })
+	end
+
+	function Window:_dzSave()
+		local st = self._dz
+		if st then self:_store("design", { mode = st.mode, src = st.src, vis = st.vis, dim = st.dim, fit = st.fit }) end
+	end
+
+	function Window:_dzApply()
+		local bg, st = self._bg, self._dz
+		if not bg or not bg.Parent or not st then return end
+		local on = st.mode == "custom" and type(self._dzAsset) == "string" and self._dzAsset ~= ""
+		bg.Visible = on
+		if not on then return end
+		bg.Image = self._dzAsset
+		bg.ScaleType = FITS[st.fit] or Enum.ScaleType.Crop
+		bg.ImageTransparency = 1 - math.clamp(st.vis, 5, 100) / 100
+		local g = 1 - math.clamp(st.dim, 0, 85) / 100
+		bg.ImageColor3 = Color3.new(g, g, g)
+	end
+
+	function Window:SetDesign(mode)
+		local st = self._dz
+		if not st or (mode ~= "default" and mode ~= "custom") then return false end
+		st.mode = mode
+		if mode == "custom" and not self._dzAsset and st.src ~= "" then self:SetDesignImage(st.src, true) end
+		self:_dzApply(); self:_dzSave()
+		if self._dzRefresh then self._dzRefresh() end
+		return true
+	end
+
+	function Window:SetDesignOption(key, value)
+		local st = self._dz
+		if not st then return false end
+		if key == "vis" and type(value) == "number" then
+			st.vis = math.clamp(math.floor(value + 0.5), 5, 100)
+		elseif key == "dim" and type(value) == "number" then
+			st.dim = math.clamp(math.floor(value + 0.5), 0, 85)
+		elseif key == "fit" and FITS[value] then
+			st.fit = value
+		else return false end
+		self:_dzApply(); self:_dzSave()
+		if self._dzRefresh then self._dzRefresh() end
+		return true
+	end
+
+	function Window:SetDesignImage(src, silent)
+		local st = self._dz
+		if not st then return false, "belum siap" end
+		src = trim(src)
+		self._dzTok = (self._dzTok or 0) + 1
+		local tok, done = self._dzTok, false
+		if src == "" then
+			st.src, self._dzAsset = "", nil
+			self:_dzApply(); self:_dzSave()
+			if self._dzRefresh then self._dzRefresh() end
+			return true
+		end
+		local started, why = resolve(src, function(asset)
+			if self._dzTok ~= tok or not self.Gui or type(asset) ~= "string" or asset == "" then return end
+			done, self._dzAsset = true, asset
+			st.src, st.mode = src, "custom"
+			self:_dzApply(); self:_dzSave()
+			if not silent then self:_dzNote("imgOk", "success") end
+			if self._dzRefresh then self._dzRefresh() end
+		end)
+		if not started then
+			if not silent then self:_dzNote(why == "url" and "imgNoUrl" or "imgBad", "error") end
+			return false, why
+		end
+		if not silent then task.delay(10, function()
+			if self._dzTok == tok and not done and self.Gui then self:_dzNote("imgBad", "error") end
+		end) end
+		return true
+	end
+
+	function Window:ResetDesign()
+		local st = self._dz
+		if not st then return false end
+		for k, v in pairs(DEF) do st[k] = v end
+		self._dzTok = (self._dzTok or 0) + 1
+		self._dzAsset = nil
+		self:_dzApply(); self:_dzSave()
+		if self._dzRefresh then self._dzRefresh() end
+		return true
+	end
+
+	function Window:OpenUISettings()
+		local st = self._dz
+		if not st or not self.Overlay then return end
+		if self._uiPanel and self._uiPanel == self._pop then
+			self:ClosePopup(); self._uiPanel = nil; return
+		end
+		self:ClosePopup()
+		local win, cam = self, workspace.CurrentCamera
+		local vp = cam and cam.ViewportSize or Vector2.new(800, 400)
+		local W, H = math.clamp(vp.X - 24, 250, 360), math.clamp(vp.Y - 40, 230, 430)
+		local ap, as = self.Root.AbsolutePosition, self.Root.AbsoluteSize
+		local cx = math.clamp(ap.X + as.X / 2, W / 2 + 8, math.max(W / 2 + 8, vp.X - W / 2 - 8))
+		local cy = math.clamp(ap.Y + as.Y / 2, H / 2 + 8, math.max(H / 2 + 8, vp.Y - H / 2 - 8))
+		local blk = Btn(self.Overlay, { Size = UDim2.fromScale(1, 1), ZIndex = 110, BackgroundColor3 = Color3.new(0,0,0), BackgroundTransparency = 0.55 })
+		self._pop, self._uiPanel = blk, blk
+		blk.MouseButton1Click:Connect(function() win:ClosePopup() end)
+		local card = New("Frame", {
+			AnchorPoint = Vector2.new(0.5,0.5), Position = UDim2.fromOffset(cx,cy), Size = UDim2.fromOffset(W,H),
+			BackgroundColor3 = Theme.Panel, BackgroundTransparency = 0.02, BorderSizePixel = 0, Active = true, ZIndex = 111, Parent = blk,
+		}, { Corner(14), Stroke(Theme.Blue,1,0.45) })
+		Lbl(card, { Position = UDim2.fromOffset(16,0), Size = UDim2.new(1,-60,0,44), Font = FONT.Bold, TextSize = 15, TextColor3 = Theme.Text, TextXAlignment = Enum.TextXAlignment.Left, Text = Library:T("uiSet") })
+		local x = Btn(card, { AnchorPoint = Vector2.new(1,0), Position = UDim2.new(1,-8,0,8), Size = UDim2.fromOffset(28,28) })
+		Library.Icon("close", x, 12, Theme.SubText, true)
+		x.MouseButton1Click:Connect(function() win:ClosePopup() end)
+		New("Frame", { Position = UDim2.fromOffset(0,44), Size = UDim2.new(1,0,0,1), BackgroundColor3 = Theme.Border, BorderSizePixel = 0, Parent = card })
+		local scroll = New("ScrollingFrame", {
+			Position = UDim2.fromOffset(0,45), Size = UDim2.new(1,0,1,-45), BackgroundTransparency = 1, BorderSizePixel = 0,
+			ScrollBarThickness = 3, ScrollBarImageColor3 = Theme.Blue, CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, Parent = card,
+		}, { Pad(16,12,16,16), New("UIListLayout", { Padding = UDim.new(0,10), SortOrder = Enum.SortOrder.LayoutOrder }) })
+		local order, refreshers = 0, {}
+		local function nxt() order += 1; return order end
+		local function row(h) return New("Frame", { Size = UDim2.new(1,0,0,h), BackgroundTransparency = 1, LayoutOrder = nxt(), Parent = scroll }) end
+		local function pill(parent, txt, size, pos)
+			return Btn(parent, { Size = size, Position = pos or UDim2.new(), Text = txt, TextSize = 12, BackgroundTransparency = 0, BackgroundColor3 = Theme.Secondary }, { Corner(8), Stroke(Theme.Glow,1,0.72) })
+		end
+		local function paint(b,on) b.BackgroundColor3 = on and Theme.Blue or Theme.Secondary; b.TextColor3 = on and Theme.Background or Theme.Text end
+		Lbl(scroll, { Size = UDim2.new(1,0,0,18), Font = FONT.Bold, TextSize = 11, TextColor3 = Theme.Blue, TextXAlignment = Enum.TextXAlignment.Left, Text = string.upper(Library:T("dsgn")), LayoutOrder = nxt() })
+		local chips = row(34)
+		local chipD = pill(chips,Library:T("dDef"),UDim2.new(0.5,-4,1,0))
+		local chipC = pill(chips,Library:T("dCus"),UDim2.new(0.5,-4,1,0),UDim2.new(0.5,4,0,0))
+		chipD.MouseButton1Click:Connect(function() win:SetDesign("default") end)
+		chipC.MouseButton1Click:Connect(function() win:SetDesign("custom") end)
+		Lbl(scroll, { Size = UDim2.new(1,0,0,0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextTruncate = Enum.TextTruncate.None, TextXAlignment = Enum.TextXAlignment.Left, TextSize = 11, Text = "Pilihan desain lain menyusul. Desain Custom mendukung gambar latar sendiri.", LayoutOrder = nxt() })
+		Lbl(scroll, { Size = UDim2.new(1,0,0,18), Font = FONT.Semi, TextSize = 13, TextColor3 = Theme.Text, TextXAlignment = Enum.TextXAlignment.Left, Text = Library:T("imgLbl"), LayoutOrder = nxt() })
+		local boxRow = row(34)
+		local box = New("TextBox", { Size = UDim2.new(1,0,1,0), BackgroundColor3 = Theme.Secondary, BackgroundTransparency = 0.05, BorderSizePixel = 0, ClearTextOnFocus = false, Font = FONT.Medium, TextSize = 12, TextColor3 = Theme.Text, PlaceholderText = Library:T("imgPh"), PlaceholderColor3 = Theme.SubText, Text = st.src, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd, ClipsDescendants = true, Parent = boxRow }, { Corner(8), Pad(10,0,10,0) })
+		local btns = row(34)
+		local bApply = pill(btns,Library:T("apply"),UDim2.new(0.5,-4,1,0))
+		local bClear = pill(btns,Library:T("clear"),UDim2.new(0.5,-4,1,0),UDim2.new(0.5,4,0,0))
+		paint(bApply,true)
+		local function doApply()
+			if trim(box.Text) == "" then win:_dzNote("imgEmpty","warn"); return end
+			win:SetDesignImage(box.Text,false)
+		end
+		bApply.MouseButton1Click:Connect(doApply)
+		box.FocusLost:Connect(function(enter) if enter then doApply() end end)
+		bClear.MouseButton1Click:Connect(function() box.Text = ""; win:SetDesignImage("",true) end)
+		local function slider(label,key,mn,mx)
+			local r = row(52)
+			Lbl(r, { Size = UDim2.new(1,-60,0,20), Font = FONT.Semi, TextSize = 13, TextColor3 = Theme.Text, TextXAlignment = Enum.TextXAlignment.Left, Text = label })
+			local val = Lbl(r, { AnchorPoint = Vector2.new(1,0), Position = UDim2.new(1,0,0,0), Size = UDim2.fromOffset(54,20), Font = FONT.Bold, TextSize = 12, TextColor3 = Theme.Cyan, TextXAlignment = Enum.TextXAlignment.Right, Text = "" })
+			local track = New("Frame", { Position = UDim2.fromOffset(0,32), Size = UDim2.new(1,0,0,6), BackgroundColor3 = Theme.Off, BorderSizePixel = 0, Parent = r }, { Corner(0,1) })
+			local fill = New("Frame", { Size = UDim2.fromScale(0,1), BackgroundColor3 = Theme.Blue, BorderSizePixel = 0, Parent = track }, { Corner(0,1) })
+			local thumb = New("Frame", { AnchorPoint = Vector2.new(0.5,0.5), Position = UDim2.fromScale(0,0.5), Size = UDim2.fromOffset(16,16), BackgroundColor3 = Theme.Soft, BorderSizePixel = 0, Parent = track }, { Corner(0,1) })
+			local hit = New("TextButton", { Position = UDim2.fromOffset(0,18), Size = UDim2.new(1,0,0,34), BackgroundTransparency = 1, Text = "", Parent = r })
+			local function show()
+				local rel = math.clamp((st[key]-mn)/(mx-mn),0,1)
+				fill.Size = UDim2.fromScale(rel,1); thumb.Position = UDim2.fromScale(rel,0.5); val.Text = tostring(st[key]).."%"
+			end
+			local function fromX(px)
+				local w = math.max(track.AbsoluteSize.X,1)
+				local v = math.floor(mn+(mx-mn)*math.clamp((px-track.AbsolutePosition.X)/w,0,1)+0.5)
+				if v ~= st[key] then win:SetDesignOption(key,v) end
+			end
+			Library:Gesture({ id = "uiset_"..key, win = win, hit = hit, page = scroll, mode = "h", start = function(p) fromX(p.X) end, move = function(p) fromX(p.X) end, finish = function() end })
+			table.insert(refreshers,show); show()
+		end
+		slider(Library:T("vis"),"vis",5,100)
+		slider(Library:T("dim"),"dim",0,85)
+		local fitRow = row(34)
+		local fitBtn = pill(fitRow,"",UDim2.fromScale(1,1))
+		fitBtn.MouseButton1Click:Connect(function()
+			local i = table.find(FIT_ORDER,st.fit) or 1
+			win:SetDesignOption("fit",FIT_ORDER[(i % #FIT_ORDER)+1])
+		end)
+		local rstRow = row(34)
+		local rst = pill(rstRow,Library:T("rst"),UDim2.fromScale(1,1))
+		rst.TextColor3 = Theme.Red
+		rst.MouseButton1Click:Connect(function() box.Text = ""; win:ResetDesign() end)
+		local function refresh()
+			if not card.Parent then return end
+			paint(chipD,st.mode ~= "custom"); paint(chipC,st.mode == "custom")
+			fitBtn.Text = Library:T("fit")..": "..st.fit
+			if not box:IsFocused() then box.Text = st.src end
+			for _,fn in ipairs(refreshers) do fn() end
+		end
+		self._dzRefresh = refresh
+		blk.Destroying:Connect(function() if win._dzRefresh == refresh then win._dzRefresh = nil end end)
+		refresh()
+	end
+
+	function Window:_dzInit()
+		local st = {}
+		for k,v in pairs(DEF) do st[k] = v end
+		local saved = self:_load("design",nil)
+		if type(saved) == "table" then
+			if saved.mode == "custom" then st.mode = "custom" end
+			if type(saved.src) == "string" then st.src = saved.src end
+			if type(saved.vis) == "number" then st.vis = math.clamp(math.floor(saved.vis),5,100) end
+			if type(saved.dim) == "number" then st.dim = math.clamp(math.floor(saved.dim),0,85) end
+			if type(saved.fit) == "string" and FITS[saved.fit] then st.fit = saved.fit end
+		end
+		self._dz = st
+		self._bg = New("ImageLabel", { Name = "XBg", Size = UDim2.fromScale(1,1), BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 0, Visible = false, Image = "", Parent = self.Main }, { Corner(16) })
+		local header = self.Main:FindFirstChild("Header")
+		if header then
+			local hasIcon = header:FindFirstChildWhichIsA("ImageLabel") ~= nil
+			local gx, shift = hasIcon and 58 or 14, GEARW + GAP
+			for _,c in ipairs(header:GetChildren()) do
+				if c:IsA("TextLabel") and c.Position.X.Scale == 0 and c.Position.X.Offset < 80 then
+					local p,sz = c.Position,c.Size
+					c.Position = UDim2.new(p.X.Scale,p.X.Offset+shift,p.Y.Scale,p.Y.Offset)
+					c.Size = UDim2.new(sz.X.Scale,sz.X.Offset-shift,sz.Y.Scale,sz.Y.Offset)
+				end
+			end
+			local gear = New("TextButton", { Name = "XGear", Position = UDim2.new(0,gx,0.5,-GEARW/2), Size = UDim2.fromOffset(GEARW,GEARW), BackgroundColor3 = Theme.Secondary, BackgroundTransparency = self._fieldT or 0.5, AutoButtonColor = false, Text = "", Parent = header }, { Corner(9), Stroke(Theme.Glow,1,0.72) })
+			Library.Icon("gear",gear,16,Theme.SubText,true)
+			Pressable(gear,gear,Theme.Secondary,Theme.Hover)
+			gear.MouseButton1Click:Connect(function() self:OpenUISettings() end)
+			self._gear = gear
+		end
+		pcall(self.AddCommand,self,{ Name = Library:T("uiSet"), Keywords = "setting desain gambar custom ui tema", Callback = function() self:OpenUISettings() end })
+		if st.mode == "custom" and st.src ~= "" then self:SetDesignImage(st.src,true) end
+	end
+
+	local baseRetheme = Window._retheme
+	function Window:_retheme(old)
+		baseRetheme(self,old)
+		if self._bg then self:_dzApply() end
+	end
+	local baseCreate = Library.CreateWindow
+	function Library:CreateWindow(...)
+		local win = baseCreate(self,...)
+		if type(win) == "table" and win.Main and not win._dz then
+			local ok,err = pcall(win._dzInit,win)
+			if not ok then warn("[XevoraUI] Pengaturan UI gagal dibuat: "..tostring(err)) end
+		end
+		return win
+	end
+end
+--// ===== SELESAI P12 =====
+
 return Library
