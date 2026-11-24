@@ -8833,4 +8833,29 @@ do
 end
 --// ===== SELESAI P11 =====
 
+
+--// ===== MULAI P11V (tema Obsidian: preset + Library:UseObsidian) =====
+do
+	local function preset(accent, accent2, glow)
+		return {
+			Background = "#07080B", Panel = "#0B0C10", Card = "#12131A", Secondary = "#1A1C25",
+			Hover = "#242732", Off = "#2B2E3B", Border = "#2A2D3A", Glow = glow,
+			Blue = accent, Cyan = accent2, Purple = "#9B6BFF", Red = "#FF526D", Soft = "#EDEDED",
+			Text = "#F5F5F7", SubText = "#A3A6B3",
+			PanelT = 0.30, CardT = 0.38, FieldT = 0.45,
+		}
+	end
+
+	Library.Presets["Obsidian Gold"] = preset("#E2B33A", "#F6D77E", "#B8912E")
+	Library.Presets["Obsidian Ice"] = preset("#5685FF", "#8FB8FF", "#5A78D2")
+
+	-- Opt-in: tampilan lama tidak berubah sampai fungsi ini dipanggil.
+	function Library:UseObsidian(variant, switchStyle)
+		local name = (variant == "Ice") and "Obsidian Ice" or "Obsidian Gold"
+		if switchStyle ~= false then Library.ToggleStyle = "Switch" end
+		return Library:SetTheme(name)
+	end
+end
+--// ===== SELESAI P11V =====
+
 return Library
