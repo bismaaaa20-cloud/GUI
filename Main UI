@@ -8736,6 +8736,101 @@ do
 end
 --// ===== SELESAI P10 =====
 
+--// ===== MULAI P11 (Graph mode garis) =====
+do
+	local baseGraph = Tab.AddGraph
 
+	function Tab:AddGraph(o)
+		o = o or {}
+		if string.lower(tostring(o.Mode or "bars")) ~= "line" then
+			return baseGraph(self, o)
+		end
+		local cap
+		self._row = function(s, ...)
+			local r = Tab._row(s, ...)
+			cap = r
+			return r
+		end
+		local ok, obj = pcall(baseGraph, self, o)
+		self._row = nil
+		if not ok then error(obj, 0) end
+		if not cap or type(obj) ~= "table" then return obj end
+
+		local plot
+		for _, c in ipairs(cap:GetChildren()) do
+			if c:IsA("Frame") and c.ClipsDescendants then plot = c break end
+		end
+		if not plot then return obj end
+
+		local N = 0
+		for _, c in ipairs(plot:GetChildren()) do
+			if c:IsA("Frame") then
+				c.Visible = false
+				N += 1
+			end
+		end
+		if N < 2 then return obj end
+
+		local color = typeof(o.Color) == "Color3" and o.Color or Theme.Blue
+		local fixed = tonumber(o.Max)
+		local vals, segs = {}, {}
+		for i = 1, N do vals[i] = 0 end
+		for i = 1, N - 1 do
+			segs[i] = New("Frame", {
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				Size = UDim2.fromOffset(0, 2),
+				BackgroundColor3 = color,
+				BorderSizePixel = 0,
+				ZIndex = 2,
+				Parent = plot,
+			})
+		end
+
+		local function draw()
+			local sz = plot.AbsoluteSize
+			if sz.X <= 0 or sz.Y <= 0 then return end
+			local m = fixed or 0
+			if not fixed then
+				for i = 1, N do
+					if vals[i] > m then m = vals[i] end
+				end
+			end
+			if m <= 0 then m = 1 end
+			local top, usable = 18, math.max(1, sz.Y - 22)
+			local function pt(i)
+				local r = math.clamp(vals[i] / m, 0, 1)
+				return Vector2.new((i - 1) / (N - 1) * sz.X, top + usable * (1 - r))
+			end
+			for i = 1, N - 1 do
+				local a, b = pt(i), pt(i + 1)
+				local d = b - a
+				local s = segs[i]
+				s.Position = UDim2.fromOffset((a.X + b.X) / 2, (a.Y + b.Y) / 2)
+				s.Size = UDim2.fromOffset(d.Magnitude + 1, 2)
+				s.Rotation = math.deg(math.atan2(d.Y, d.X))
+			end
+		end
+
+		local basePush, baseClear = obj.Push, obj.Clear
+		function obj:Push(v)
+			local n = tonumber(v)
+			if not n or n ~= n or n == math.huge or n == -math.huge then return end
+			table.remove(vals, 1)
+			vals[N] = n
+			basePush(obj, n)
+			draw()
+		end
+		function obj:Clear()
+			for i = 1, N do vals[i] = 0 end
+			baseClear(obj)
+			draw()
+		end
+
+		plot:GetPropertyChangedSignal("AbsoluteSize"):Connect(draw)
+		draw()
+		return obj
+	end
+end
+--// ===== SELESAI P11 =====
 
 return Library
