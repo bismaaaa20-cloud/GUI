@@ -8884,11 +8884,25 @@ do
 		return (tostring(v or ""):gsub("^%s+", ""):gsub("%s+$", ""))
 	end
 
+	local function boundedNumber(value, fallback, minValue, maxValue)
+		local n = tonumber(value)
+		if not n or n ~= n or n == math.huge or n == -math.huge then
+			return fallback
+		end
+		return math.clamp(math.floor(n + 0.5), minValue, maxValue)
+	end
+
 	local function resolve(src, cb)
 		local low = src:lower()
-		if src:match("^%d+$") or low:match("^rbxassetid://") or low:match("^rbxasset://")
-			or low:match("^https?://www%.roblox%.com/asset") then
+		if src:match("^%d+$") or low:match("^rbxassetid://") or low:match("^rbxasset://") then
 			cb(ToAsset(src))
+			return true
+		end
+		-- Ubah URL halaman asset Roblox menjadi ID yang dapat dipakai ImageLabel.
+		if low:match("^https?://www%.roblox%.com/asset") then
+			local assetId = low:match("[?&]id=(%d+)") or low:match("/asset/(%d+)")
+			if not assetId then return false, "file" end
+			cb("rbxassetid://" .. assetId)
 			return true
 		end
 		if low:match("^https?://") then
@@ -8940,7 +8954,7 @@ do
 	function Window:SetDesignOption(key, value)
 		local st = self._dz
 		if not st then return false end
-		if type(value) == "number" and value ~= value then return false end
+		if type(value) == "number" and (value ~= value or value == math.huge or value == -math.huge) then return false end
 		if key == "vis" and type(value) == "number" then
 			st.vis = math.clamp(math.floor(value + 0.5), 5, 100)
 		elseif key == "dim" and type(value) == "number" then
@@ -8960,7 +8974,7 @@ do
 		self._dzTok = (self._dzTok or 0) + 1
 		local tok, done = self._dzTok, false
 		if src == "" then
-			st.src, self._dzAsset = "", nil
+			st.src, st.mode, self._dzAsset = "", "default", nil
 			self:_dzApply(); self:_dzSave()
 			if self._dzRefresh then self._dzRefresh() end
 			return true
@@ -8978,7 +8992,11 @@ do
 			return false, why
 		end
 		if not silent then task.delay(10, function()
-			if self._dzTok == tok and not done and self.Gui then self:_dzNote("imgBad", "error") end
+			if self._dzTok == tok and not done and self.Gui then
+				done = true
+				self._dzTok = self._dzTok + 1 -- Tolak callback unduhan yang datang setelah timeout.
+				self:_dzNote("imgBad", "error")
+			end
 		end) end
 		return true
 	end
@@ -8998,8 +9016,11 @@ do
 		local st = self._dz
 		if not st or not self.Overlay then return end
 		if self._uiPanel and self._uiPanel == self._pop then
-			self:ClosePopup(); self._uiPanel = nil; return
+			self:ClosePopup()
+			return
 		end
+		-- Tutup dropdown/menu lain sebelum panel pengaturan dibuka.
+		if self._closePopup then self._closePopup() end
 		self:ClosePopup()
 		local win, cam = self, workspace.CurrentCamera
 		local vp = cam and cam.ViewportSize or Vector2.new(800, 400)
@@ -9009,7 +9030,16 @@ do
 		local cy = math.clamp(ap.Y + as.Y / 2, H / 2 + 8, math.max(H / 2 + 8, vp.Y - H / 2 - 8))
 		local blk = Btn(self.Overlay, { Size = UDim2.fromScale(1, 1), ZIndex = 110, BackgroundColor3 = Color3.new(0,0,0), BackgroundTransparency = 0.55 })
 		self._pop, self._uiPanel = blk, blk
-		blk.MouseButton1Click:Connect(function() win:ClosePopup() end)
+		local function closeSettings()
+			if win._pop == blk then
+				win:ClosePopup()
+			elseif blk.Parent then
+				blk:Destroy()
+			end
+		end
+		-- Pakai lifecycle popup umum agar Hide, Destroy, dan menu lain menutup panel ini.
+		self._closePopup = closeSettings
+		blk.MouseButton1Click:Connect(closeSettings)
 		local card = New("Frame", {
 			AnchorPoint = Vector2.new(0.5,0.5), Position = UDim2.fromOffset(cx,cy), Size = UDim2.fromOffset(W,H),
 			BackgroundColor3 = Theme.Panel, BackgroundTransparency = 0.02, BorderSizePixel = 0, Active = true, ZIndex = 111, Parent = blk,
@@ -9091,7 +9121,11 @@ do
 			for _,fn in ipairs(refreshers) do fn() end
 		end
 		self._dzRefresh = refresh
-		blk.Destroying:Connect(function() if win._dzRefresh == refresh then win._dzRefresh = nil end end)
+		blk.Destroying:Connect(function()
+			if win._uiPanel == blk then win._uiPanel = nil end
+			if win._closePopup == closeSettings then win._closePopup = nil end
+			if win._dzRefresh == refresh then win._dzRefresh = nil end
+		end)
 		refresh()
 	end
 
@@ -9102,8 +9136,8 @@ do
 		if type(saved) == "table" then
 			if saved.mode == "custom" then st.mode = "custom" end
 			if type(saved.src) == "string" then st.src = saved.src end
-			if type(saved.vis) == "number" then st.vis = math.clamp(math.floor(saved.vis),5,100) end
-			if type(saved.dim) == "number" then st.dim = math.clamp(math.floor(saved.dim),0,85) end
+			st.vis = boundedNumber(saved.vis, DEF.vis, 5, 100)
+			st.dim = boundedNumber(saved.dim, DEF.dim, 0, 85)
 			if type(saved.fit) == "string" and FITS[saved.fit] then st.fit = saved.fit end
 		end
 		self._dz = st
