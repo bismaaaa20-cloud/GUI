@@ -8940,6 +8940,7 @@ do
 	function Window:SetDesignOption(key, value)
 		local st = self._dz
 		if not st then return false end
+		if type(value) == "number" and value ~= value then return false end
 		if key == "vis" and type(value) == "number" then
 			st.vis = math.clamp(math.floor(value + 0.5), 5, 100)
 		elseif key == "dim" and type(value) == "number" then
