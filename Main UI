@@ -9180,4 +9180,432 @@ do
 end
 --// ===== SELESAI P12 =====
 
+
+--// ===== MULAI P13 (Mode Setting + penyimpanan khusus pengaturan UI) =====
+do
+	local HttpService = game:GetService("HttpService")
+	local SETKEYS = {
+		design = true, blur = true, ts = true, hc = true, rm = true, sb = true, locked = true,
+		qon = true, hud = true, ["as"] = true, uiauto = true, uitheme = true, uiacc = true,
+		uitr = true, uisc = true, uirgb = true,
+	}
+	local SWATCH = { "#E2B33A", "#5685FF", "#FF526D", "#5BD99A", "#9B6BFF", "#4FD1E8", "#FF8A3D", "#FF6BB5", "#EDEDED" }
+	local GREEN, AMBER = Color3.fromRGB(91, 217, 154), Color3.fromRGB(255, 190, 70)
+	Library:AddStrings("id", {
+		setMode="Mode pengaturan", cDesign="Desain", cLook="Tampilan", cBehav="Perilaku", cData="Data",
+		back="Kembali", prev="Pratinjau", noImg="Tanpa gambar", theme="Tema", accent="Warna aksen",
+		trP="Transparansi panel", trC="Transparansi kartu", trF="Transparansi kolom", blurS="Blur latar",
+		scaleS="Skala UI", tscale="Ukuran teks", hc="Kontras tinggi", rm="Kurangi animasi", rgb="Tepi berputar",
+		sidebar="Sidebar", sbFull="Penuh", sbRail="Ikon", sbHide="Sembunyi", lock="Kunci posisi window",
+		quick="Tombol Quick Toggle", hud="HUD FPS dan ping", cfgAuto="Simpan otomatis config",
+		uiAuto="Simpan otomatis pengaturan UI", uiAutoH="Mati: perubahan menunggu tombol Simpan",
+		saveNow="Simpan sekarang", stAuto="Tersimpan otomatis", stDone="Semua tersimpan", stPend="Belum disimpan",
+		exp="Ekspor kode", imp="Impor kode", codePh="Kode XU1 muncul atau ditempel di sini",
+		copied="Kode disalin ke clipboard", copyFail="Executor tidak bisa menyalin. Kode ada di kolom.",
+		impOk="Pengaturan diimpor", impBad="Kode tidak valid", rstAll="Reset semua pengaturan UI",
+		rstQ="Kembalikan pengaturan UI ke awal? Gambar latar ikut dihapus.", rstYes="Reset", rstNo="Batal",
+		saved="Pengaturan UI tersimpan", rstDone="Pengaturan UI dikembalikan",
+	})
+	Library:AddStrings("en", {
+		setMode="Settings mode", cDesign="Design", cLook="Look", cBehav="Behavior", cData="Data",
+		back="Back", prev="Preview", noImg="No image", theme="Theme", accent="Accent color",
+		trP="Panel transparency", trC="Card transparency", trF="Field transparency", blurS="Background blur",
+		scaleS="UI scale", tscale="Text size", hc="High contrast", rm="Reduce motion", rgb="Spinning border",
+		sidebar="Sidebar", sbFull="Full", sbRail="Icons", sbHide="Hidden", lock="Lock window position",
+		quick="Quick Toggle buttons", hud="FPS and ping HUD", cfgAuto="Autosave config",
+		uiAuto="Autosave UI settings", uiAutoH="Off: changes wait for the Save button",
+		saveNow="Save now", stAuto="Autosaved", stDone="All saved", stPend="Not saved",
+		exp="Export code", imp="Import code", codePh="XU1 code appears or is pasted here",
+		copied="Code copied to clipboard", copyFail="Executor cannot copy. The code is in the box.",
+		impOk="Settings imported", impBad="Invalid code", rstAll="Reset all UI settings",
+		rstQ="Restore UI settings to defaults? The background image is removed too.", rstYes="Reset", rstNo="Cancel",
+		saved="UI settings saved", rstDone="UI settings restored",
+	})
+	local function trim(s) return (tostring(s or ""):gsub("^%s+",""):gsub("%s+$","")) end
+	local function num(v, lo, hi)
+		if type(v) ~= "number" or v ~= v or v == math.huge or v == -math.huge then return nil end
+		return math.clamp(v, lo, hi)
+	end
+	local function hex(c)
+		return string.format("#%02X%02X%02X", math.floor(c.R*255+0.5), math.floor(c.G*255+0.5), math.floor(c.B*255+0.5))
+	end
+
+	-- Penyimpanan setting UI dipisahkan dari config komponen.
+	local baseStore = Window._store
+	function Window:_store(k, v)
+		local S = self._uiSet
+		if S and SETKEYS[k] then
+			if S.auto == false then
+				if S.pend[k] == nil then S.pendN += 1 end
+				S.pend[k] = { val = v }
+				self:_uiStatus()
+				return
+			end
+			baseStore(self, k, v)
+			if not S.quiet then self:_uiTouched() end
+			return
+		end
+		return baseStore(self, k, v)
+	end
+	function Window:_uiTouched()
+		local S = self._uiSet
+		if not S then return end
+		S.saved = os.time()
+		S.tok += 1
+		local token = S.tok
+		task.delay(0.8, function()
+			if self.Gui and S.tok == token then pcall(self._flushUI, self) end
+		end)
+		self:_uiStatus()
+	end
+	function Window:_uiStatus()
+		local S, ui = self._uiSet, self._uiUI
+		if not S or not ui or not ui.root.Parent then return end
+		local txt, col
+		if S.auto then
+			txt = Library:T("stAuto")
+			if S.saved then txt = txt .. " · " .. os.date("%H:%M:%S", S.saved) end
+			col = GREEN
+		elseif S.pendN > 0 then
+			txt, col = Library:T("stPend") .. " (" .. S.pendN .. ")", AMBER
+		else
+			txt, col = Library:T("stDone"), GREEN
+		end
+		ui.status.Text, ui.dot.BackgroundColor3 = txt, col
+		ui.save.Visible = not S.auto
+	end
+	function Window:SaveUISettings()
+		local S = self._uiSet
+		if not S then return false end
+		for k, p in pairs(S.pend) do baseStore(self, k, p.val) end
+		S.pend, S.pendN = {}, 0
+		self:_uiTouched()
+		pcall(self._flushUI, self)
+		pcall(self.SetStatus, self, Library:T("saved"), 2)
+		return true
+	end
+	function Window:SetUIAutosave(on)
+		local S = self._uiSet
+		if not S then return false end
+		S.auto = on ~= false
+		self:_store("uiauto", S.auto)
+		if S.auto then self:SaveUISettings() else self:_uiStatus() end
+		return true
+	end
+
+	local function collect(win)
+		local d = win._dz or {}
+		return {
+			design={mode=d.mode,src=d.src,vis=d.vis,dim=d.dim,fit=d.fit},
+			theme=Library.ThemeName, accent=hex(Theme.Blue),
+			trP=win._panelT or 0.38, trC=win._cardT or 0.45, trF=win._fieldT or 0.5,
+			blur=win._blur or 0, ts=math.floor((win._ts or 1)*100+0.5),
+			hc=win._hcOld ~= nil, rm=Library.ReduceMotion == true, rgb=win._rgbWanted ~= false,
+			sb=win._sbMode or "full", locked=win._locked == true, qon=win._qOn == true,
+			hud=win._hudOn == true, cfgAuto=win._as == true, scale=win._mult or 1,
+		}
+	end
+	local function persistExtra(win, accentSet)
+		win:_store("uitheme", Library.ThemeName)
+		win:_store("uiacc", accentSet and hex(Theme.Blue) or false)
+		win:_store("uitr", {win._panelT or 0.38,win._cardT or 0.45,win._fieldT or 0.5})
+		win:_store("uisc", win._mult or 1)
+		win:_store("uirgb", win._rgbWanted ~= false)
+	end
+	local function applyState(win, t)
+		if type(t) ~= "table" then return false end
+		local function try(f, ...) if type(f)=="function" then pcall(f, ...) end end
+		local d=t.design
+		if type(d)=="table" then
+			try(win.SetDesignOption,win,"vis",d.vis); try(win.SetDesignOption,win,"dim",d.dim); try(win.SetDesignOption,win,"fit",d.fit)
+			if type(d.src)=="string" then try(win.SetDesignImage,win,d.src,true) end
+			if d.mode=="custom" or d.mode=="default" then try(win.SetDesign,win,d.mode) end
+		end
+		local themed=false
+		if type(t.theme)=="string" and Library.Presets[t.theme] then try(Library.SetTheme,Library,t.theme); themed=true end
+		local accented=false
+		if type(t.accent)=="string" and t.accent:match("^#%x%x%x%x%x%x$") and (not themed or t.accent~=hex(Theme.Blue)) then
+			try(Library.SetAccent,Library,Color3.fromHex(t.accent)); accented=true
+		end
+		local p,c,f=num(t.trP,0,0.7),num(t.trC,0,0.8),num(t.trF,0,0.85)
+		if p and c and f then try(win.SetTransparency,win,p,c,f) end
+		local b=num(t.blur,0,24); if b then try(win.SetBlur,win,b) end
+		local ts=num(t.ts,80,150); if ts then try(win.SetTextScale,win,ts) end
+		if type(t.hc)=="boolean" then try(win.SetContrast,win,t.hc) end
+		if type(t.rm)=="boolean" then try(win.SetReduceMotion,win,t.rm) end
+		if type(t.rgb)=="boolean" then try(win.SetRGB,win,t.rgb) end
+		if t.sb=="full" or t.sb=="rail" or t.sb=="hidden" then try(win.SetSidebar,win,t.sb) end
+		if type(t.locked)=="boolean" then try(win.SetLocked,win,t.locked) end
+		if type(t.qon)=="boolean" then try(win.SetQuickBar,win,t.qon) end
+		if type(t.hud)=="boolean" then try(win.ShowHUD,win,t.hud) end
+		if type(t.cfgAuto)=="boolean" then try(win.SetAutosave,win,t.cfgAuto) end
+		local sc=num(t.scale,0.5,1.5); if sc then try(win.SetScale,win,sc) end
+		persistExtra(win,accented)
+		return true
+	end
+	function Window:ExportUISettings() return "XU1:" .. HttpService:JSONEncode(collect(self)) end
+	function Window:ImportUISettings(code)
+		code=trim(code)
+		if code:sub(1,4)~="XU1:" then return false end
+		local ok,t=pcall(HttpService.JSONDecode,HttpService,code:sub(5))
+		if not ok or type(t)~="table" then return false end
+		return applyState(self,t)
+	end
+	function Window:ResetUISettings()
+		self:ResetDesign()
+		applyState(self,{theme="Dark Glass",trP=0.38,trC=0.45,trF=0.5,blur=0,ts=100,hc=false,rm=false,rgb=true,sb="full",locked=false,qon=true,hud=false,cfgAuto=false,scale=1})
+		self:_store("uiacc",false)
+		if self._uiUI then self._uiUI.refreshAll() end
+		return true
+	end
+
+	-- Komponen visual sederhana; setiap halaman dibuat sekali agar gesture tidak menumpuk.
+	function Window:_uiBuild()
+		if self._uiUI then return self._uiUI end
+		local win,S=self,self._uiSet
+		local header=self.Main:FindFirstChild("Header")
+		local hh=(header and header.Size.Y.Offset>0) and header.Size.Y.Offset or 52
+		local root=New("Frame",{Name="XSetMode",Position=UDim2.fromOffset(0,hh),Size=UDim2.new(1,0,1,-hh),BackgroundColor3=Theme.Background,BackgroundTransparency=0.08,BorderSizePixel=0,Active=true,Visible=false,ZIndex=40,ClipsDescendants=true,Parent=self.Main})
+		local rail=New("Frame",{Size=UDim2.new(0,112,1,-30),BackgroundTransparency=1,ZIndex=41,Parent=root},{Pad(8,8,8,8),New("UIListLayout",{Padding=UDim.new(0,6),SortOrder=Enum.SortOrder.LayoutOrder})})
+		local top=New("ScrollingFrame",{Size=UDim2.new(1,0,0,38),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=0,CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.X,ScrollingDirection=Enum.ScrollingDirection.X,Visible=false,ZIndex=41,Parent=root},{Pad(8,4,8,4),New("UIListLayout",{Padding=UDim.new(0,6),FillDirection=Enum.FillDirection.Horizontal})})
+		local area=New("Frame",{Position=UDim2.fromOffset(112,0),Size=UDim2.new(1,-112,1,-30),BackgroundTransparency=1,ZIndex=41,Parent=root})
+		local strip=New("Frame",{AnchorPoint=Vector2.new(0,1),Position=UDim2.fromScale(0,1),Size=UDim2.new(1,0,0,30),BackgroundColor3=Theme.Panel,BorderSizePixel=0,ZIndex=42,Parent=root},{Stroke(Theme.Border,1,0.6)})
+		local dot=New("Frame",{Position=UDim2.new(0,10,0.5,-4),Size=UDim2.fromOffset(8,8),BackgroundColor3=GREEN,BorderSizePixel=0,ZIndex=43,Parent=strip},{Corner(0,1)})
+		local status=Lbl(strip,{Position=UDim2.fromOffset(24,0),Size=UDim2.new(1,-210,1,0),TextSize=11,TextXAlignment=Enum.TextXAlignment.Left,Text="",ZIndex=43})
+		local function barButton(txt,w,x)
+			return Btn(strip,{AnchorPoint=Vector2.new(1,0.5),Position=UDim2.new(1,x,0.5,0),Size=UDim2.fromOffset(w,22),Text=txt,TextSize=11,BackgroundTransparency=0,BackgroundColor3=Theme.Secondary,ZIndex=43},{Corner(7),Stroke(Theme.Glow,1,0.72)})
+		end
+		local back=barButton("← "..Library:T("back"),82,-8)
+		local save=barButton(Library:T("saveNow"),104,-98); save.Visible=false; save.BackgroundColor3=Theme.Blue; save.TextColor3=Theme.Background
+		local ui={root=root,dot=dot,status=status,save=save,pages={},built={},cat="design"}
+		self._uiUI=ui
+		local refreshers={}
+		local function refreshAll() for _,f in ipairs(refreshers) do pcall(f) end; self:_uiStatus() end
+		ui.refreshAll=refreshAll
+		local function page(name)
+			local pg=New("ScrollingFrame",{Size=UDim2.fromScale(1,1),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=3,ScrollBarImageColor3=Theme.Blue,CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y,Visible=false,ZIndex=41,Parent=area},{Pad(12,10,12,16),New("UIListLayout",{Padding=UDim.new(0,8),SortOrder=Enum.SortOrder.LayoutOrder})})
+			ui.pages[name]=pg; return pg
+		end
+		local function label(pg,txt)
+			Lbl(pg,{Size=UDim2.new(1,0,0,22),Text=txt,TextColor3=Theme.Text,TextSize=13,TextXAlignment=Enum.TextXAlignment.Left,LayoutOrder=100+ #pg:GetChildren()})
+		end
+		local function button(pg,txt,fn)
+			local b=Btn(pg,{Size=UDim2.new(1,0,0,32),Text=txt,TextSize=12,BackgroundTransparency=0,BackgroundColor3=Theme.Secondary,LayoutOrder=100+#pg:GetChildren()},{Corner(8),Stroke(Theme.Glow,1,0.75)})
+			b.MouseButton1Click:Connect(fn); return b
+		end
+		local function choice(pg,txt,opts,get,set)
+			label(pg,txt)
+			local row=New("Frame",{Size=UDim2.new(1,0,0,34),BackgroundTransparency=1,LayoutOrder=100+#pg:GetChildren(),Parent=pg})
+			New("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,5),Parent=row})
+			local bs={}
+			for i,o in ipairs(opts) do
+				local b=Btn(row,{Size=UDim2.new(1/#opts,-5,1,0),Text=o[2],TextSize=11,BackgroundTransparency=0,BackgroundColor3=Theme.Secondary,LayoutOrder=i},{Corner(7)})
+				b.MouseButton1Click:Connect(function() set(o[1]); refreshAll() end); bs[#bs+1]={b,o[1]}
+			end
+			refreshers[#refreshers+1]=function() for _,v in ipairs(bs) do v[1].BackgroundColor3=(get()==v[2]) and Theme.Blue or Theme.Secondary end end
+		end
+		local function toggle(pg,txt,get,set)
+			local b=button(pg,txt,function() set(not get()); refreshAll() end)
+			refreshers[#refreshers+1]=function() b.Text=txt.." : "..(get() and "ON" or "OFF"); b.BackgroundColor3=get() and Theme.Blue or Theme.Secondary end
+		end
+		local function slider(pg,txt,id,mn,mx,get,set,suffix)
+			label(pg,txt)
+			local val=Lbl(pg,{Size=UDim2.new(1,0,0,18),Text="",TextColor3=Theme.Cyan,TextXAlignment=Enum.TextXAlignment.Left,TextSize=11,LayoutOrder=100+#pg:GetChildren()})
+			local track=New("Frame",{Size=UDim2.new(1,0,0,7),BackgroundColor3=Theme.Off,BorderSizePixel=0,LayoutOrder=100+#pg:GetChildren(),Parent=pg},{Corner(0,1)})
+			local fill=New("Frame",{Size=UDim2.fromScale(0,1),BackgroundColor3=Theme.Blue,BorderSizePixel=0},{Corner(0,1)}); fill.Parent=track
+			local hit=New("TextButton",{Position=UDim2.new(0,0,0,-12),Size=UDim2.new(1,0,0,32),BackgroundTransparency=1,Text="",ZIndex=45,Parent=track})
+			local function show()
+				local v=get(); local rel=math.clamp((v-mn)/(mx-mn),0,1)
+				fill.Size=UDim2.fromScale(rel,1); val.Text=tostring(math.floor(v+0.5))..(suffix or "")
+			end
+			local function setX(pos)
+				local w=math.max(track.AbsoluteSize.X,1)
+				local v=math.floor(mn+(mx-mn)*math.clamp((pos.X-track.AbsolutePosition.X)/w,0,1)+0.5)
+				if v~=get() then set(v); refreshAll() end
+			end
+			Library:Gesture({id="p13_"..id,win=win,hit=hit,page=pg,mode="h",start=setX,move=setX})
+			refreshers[#refreshers+1]=show; show()
+		end
+		local function textBox(pg,ph)
+			local box=New("TextBox",{Size=UDim2.new(1,0,0,34),BackgroundColor3=Theme.Secondary,BackgroundTransparency=0.05,BorderSizePixel=0,ClearTextOnFocus=false,Font=FONT.Medium,TextSize=12,TextColor3=Theme.Text,PlaceholderText=ph,Text="",TextXAlignment=Enum.TextXAlignment.Left,LayoutOrder=100+#pg:GetChildren(),Parent=pg},{Corner(8),Pad(10,0,10,0)})
+			return box
+		end
+
+		local function buildDesign()
+			local pg=page("design"); local d=win._dz
+			choice(pg,Library:T("cDesign"),{{"default","Bawaan"},{"custom","Custom"}},function() return d.mode end,function(v) win:SetDesign(v) end)
+			label(pg,Library:T("prev"))
+			local preview=New("ImageLabel",{Size=UDim2.new(1,0,0,82),BackgroundColor3=Theme.Secondary,BorderSizePixel=0,Image="",ScaleType=Enum.ScaleType.Crop,LayoutOrder=100+#pg:GetChildren(),Parent=pg},{Corner(8)})
+			local box=textBox(pg,"ID asset atau URL gambar")
+			button(pg,"Terapkan gambar",function() win:SetDesignImage(trim(box.Text),false); refreshAll() end)
+			button(pg,"Hapus gambar",function() box.Text=""; win:SetDesignImage("",true); refreshAll() end)
+			slider(pg,"Kejelasan gambar","vis",5,100,function() return d.vis end,function(v) win:SetDesignOption("vis",v) end,"%")
+			slider(pg,"Gelapkan gambar","dim",0,85,function() return d.dim end,function(v) win:SetDesignOption("dim",v) end,"%")
+			choice(pg,"Mode gambar",{{"Crop","Crop"},{"Fit","Fit"},{"Stretch","Stretch"}},function() return d.fit end,function(v) win:SetDesignOption("fit",v) end)
+			button(pg,"Reset desain",function() win:ResetDesign(); box.Text=""; refreshAll() end)
+			refreshers[#refreshers+1]=function()
+				local bg=win._bg; preview.Image=(bg and bg.Visible) and bg.Image or ""; preview.ImageTransparency=(bg and bg.Visible) and bg.ImageTransparency or 0
+			end
+		end
+		local function buildLook()
+			local pg=page("look")
+			local names={}; for n in pairs(Library.Presets) do names[#names+1]=n end; table.sort(names)
+			local opts={}; for _,n in ipairs(names) do opts[#opts+1]={n,n} end
+			choice(pg,Library:T("theme"),opts,function() return Library.ThemeName end,function(n) Library:SetTheme(n); persistExtra(win,false) end)
+			label(pg,Library:T("accent"))
+			local sw=New("Frame",{Size=UDim2.new(1,0,0,38),BackgroundTransparency=1,LayoutOrder=100+#pg:GetChildren(),Parent=pg})
+			New("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,6),Parent=sw})
+			for _,h in ipairs(SWATCH) do
+				local b=Btn(sw,{Size=UDim2.fromOffset(28,28),Text="",BackgroundColor3=Color3.fromHex(h),BackgroundTransparency=0},{Corner(0,1)})
+				b.MouseButton1Click:Connect(function() Library:SetAccent(Color3.fromHex(h)); persistExtra(win,true); refreshAll() end)
+			end
+			local function tr(i) return ({win._panelT or .38,win._cardT or .45,win._fieldT or .5})[i]*100 end
+			local function setTr(i,v)
+				local t={win._panelT or .38,win._cardT or .45,win._fieldT or .5}; t[i]=v/100
+				win:SetTransparency(t[1],t[2],t[3]); win:_store("uitr",{win._panelT or t[1],win._cardT or t[2],win._fieldT or t[3]})
+			end
+			slider(pg,Library:T("trP"),"trp",0,70,function() return tr(1) end,function(v) setTr(1,v) end,"%")
+			slider(pg,Library:T("trC"),"trc",0,80,function() return tr(2) end,function(v) setTr(2,v) end,"%")
+			slider(pg,Library:T("trF"),"trf",0,85,function() return tr(3) end,function(v) setTr(3,v) end,"%")
+			slider(pg,Library:T("blurS"),"blur",0,24,function() return win._blur or 0 end,function(v) win:SetBlur(v) end," px")
+			slider(pg,Library:T("scaleS"),"scale",50,150,function() return (win._mult or 1)*100 end,function(v) win:SetScale(v/100); win:_store("uisc",win._mult or v/100) end,"%")
+			slider(pg,Library:T("tscale"),"tscale",80,150,function() return (win._ts or 1)*100 end,function(v) win:SetTextScale(v) end,"%")
+			toggle(pg,Library:T("hc"),function() return win._hcOld~=nil end,function(v) win:SetContrast(v) end)
+			toggle(pg,Library:T("rm"),function() return Library.ReduceMotion==true end,function(v) win:SetReduceMotion(v) end)
+			toggle(pg,Library:T("rgb"),function() return win._rgbWanted~=false end,function(v) win:SetRGB(v); win:_store("uirgb",v) end)
+		end
+		local function buildBehav()
+			local pg=page("behav")
+			choice(pg,Library:T("sidebar"),{{"full",Library:T("sbFull")},{"rail",Library:T("sbRail")},{"hidden",Library:T("sbHide")}},function() return win._sbMode or "full" end,function(v) win:SetSidebar(v) end)
+			toggle(pg,Library:T("lock"),function() return win._locked==true end,function(v) win:SetLocked(v) end)
+			toggle(pg,Library:T("quick"),function() return win._qOn==true end,function(v) win:SetQuickBar(v) end)
+			toggle(pg,Library:T("hud"),function() return win._hudOn==true end,function(v) win:ShowHUD(v) end)
+			toggle(pg,Library:T("cfgAuto"),function() return win._as==true end,function(v) win:SetAutosave(v) end)
+		end
+		local function buildData()
+			local pg=page("data")
+			toggle(pg,Library:T("uiAuto"),function() return S.auto end,function(v) win:SetUIAutosave(v) end)
+			button(pg,Library:T("saveNow"),function() win:SaveUISettings() end)
+			local box=textBox(pg,Library:T("codePh"))
+			button(pg,Library:T("exp"),function()
+				local code=win:ExportUISettings(); box.Text=code
+				local fn=clipboardFn; local ok=type(fn)=="function" and pcall(fn,code)
+				win:_dzNote(ok and "copied" or "copyFail",ok and "success" or "warn")
+			end)
+			button(pg,Library:T("imp"),function()
+				local ok=win:ImportUISettings(box.Text)
+				win:_dzNote(ok and "impOk" or "impBad",ok and "success" or "error"); refreshAll()
+			end)
+			local reset=button(pg,Library:T("rstAll"),function()
+				win:Confirm({Title=Library:T("rstAll"),Content=Library:T("rstQ"),Yes=Library:T("rstYes"),No=Library:T("rstNo"),Callback=function(yes)
+					if yes then win:ResetUISettings(); win:_dzNote("rstDone","success") end
+				end})
+			end)
+			reset.TextColor3=Theme.Red
+		end
+		local builders={design=buildDesign,look=buildLook,behav=buildBehav,data=buildData}
+		local names={{"design","cDesign"},{"look","cLook"},{"behav","cBehav"},{"data","cData"}}
+		local catButtons={}
+		local function showCat(cat)
+			if not builders[cat] then cat="design" end
+			if not ui.built[cat] then ui.built[cat]=true; builders[cat]() end
+			ui.cat=cat
+			for n,p in pairs(ui.pages) do p.Visible=n==cat end
+			for _,v in ipairs(catButtons) do v[1].BackgroundColor3=(v[2]==cat) and Theme.Blue or Theme.Secondary end
+			refreshAll()
+		end
+		for i,c in ipairs(names) do
+			for _,host in ipairs({rail,top}) do
+				local b=Btn(host,{Size=(host==rail) and UDim2.new(1,0,0,34) or UDim2.fromOffset(92,28),Text=Library:T(c[2]),TextSize=12,BackgroundTransparency=0,BackgroundColor3=Theme.Secondary,LayoutOrder=i},{Corner(8),Stroke(Theme.Glow,1,0.72)})
+				b.MouseButton1Click:Connect(function() showCat(c[1]) end)
+				catButtons[#catButtons+1]={b,c[1]}
+			end
+		end
+		local function layout()
+			local sc=(win._scale and win._scale.Scale) or 1
+			local narrow=(root.AbsoluteSize.X/math.max(sc,0.01))<470
+			rail.Visible=not narrow; top.Visible=narrow
+			area.Position=narrow and UDim2.fromOffset(0,38) or UDim2.fromOffset(112,0)
+			area.Size=narrow and UDim2.new(1,0,1,-68) or UDim2.new(1,-112,1,-30)
+		end
+		root:GetPropertyChangedSignal("AbsoluteSize"):Connect(layout); layout()
+		back.MouseButton1Click:Connect(function() win:CloseUISettings() end)
+		save.MouseButton1Click:Connect(function() win:SaveUISettings() end)
+		ui.showCat=showCat
+		self._dzRefresh=refreshAll
+		return ui
+	end
+
+	local function headerLabels(win)
+		local h=win.Main:FindFirstChild("Header"); local out={}
+		if not h then return out end
+		for _,c in ipairs(h:GetChildren()) do
+			if c:IsA("TextLabel") and c.Position.X.Scale==0 and c.Text~="" then out[#out+1]=c end
+		end
+		table.sort(out,function(a,b) return a.TextSize>b.TextSize end)
+		return out
+	end
+	local function gearStyle(win,on)
+		local g=win._gear; local st=g and g:FindFirstChildWhichIsA("UIStroke")
+		if st then st.Color=on and Theme.Blue or Theme.Glow; st.Transparency=on and 0.05 or 0.72 end
+	end
+	function Window:OpenUISettings(cat)
+		local S=self._uiSet
+		if not S or not self.Gui then return false end
+		if S.open and cat==nil then return self:CloseUISettings() end
+		self:ClosePopup()
+		local ui=self:_uiBuild()
+		if not S.open then
+			S.hdr={}
+			local labels=headerLabels(self)
+			if labels[1] then S.hdr[1]={labels[1],labels[1].Text}; labels[1].Text=Library:T("uiSet") end
+			if labels[2] then S.hdr[2]={labels[2],labels[2].Text}; labels[2].Text=Library:T("setMode") end
+			ui.root.Visible=true; S.open=true; gearStyle(self,true)
+		end
+		ui.showCat(cat or ui.cat or "design"); self:_uiStatus()
+		return true
+	end
+	function Window:CloseUISettings()
+		local S,ui=self._uiSet,self._uiUI
+		if not S or not S.open then return false end
+		S.open=false; if ui then ui.root.Visible=false end
+		for _,h in ipairs(S.hdr or {}) do if h[1].Parent then h[1].Text=h[2] end end
+		S.hdr=nil; gearStyle(self,false)
+		return true
+	end
+	function Window:IsUISettings() return self._uiSet~=nil and self._uiSet.open==true end
+
+	function Window:_uiInit()
+		if not self._dz then warn("[XevoraUI] P13 membutuhkan P12"); return end
+		local S={auto=true,pend={},pendN=0,tok=0,open=false,quiet=true}
+		self._uiSet=S
+		S.auto=self:_load("uiauto",true)~=false
+		local th=self:_load("uitheme",nil)
+		if type(th)=="string" and Library.Presets[th] and th~=Library.ThemeName then pcall(Library.SetTheme,Library,th) end
+		local ac=self:_load("uiacc",nil)
+		if type(ac)=="string" and ac:match("^#%x%x%x%x%x%x$") then pcall(Library.SetAccent,Library,Color3.fromHex(ac)) end
+		local tr=self:_load("uitr",nil)
+		if type(tr)=="table" and num(tr[1],0,0.7) and num(tr[2],0,0.8) and num(tr[3],0,0.85) then pcall(self.SetTransparency,self,tr[1],tr[2],tr[3]) end
+		local sc=self:_load("uisc",nil); if num(sc,0.5,1.5) then pcall(self.SetScale,self,sc) end
+		local rg=self:_load("uirgb",nil); if type(rg)=="boolean" then pcall(self.SetRGB,self,rg) end
+		S.quiet=false
+	end
+	local baseRetheme=Window._retheme
+	function Window:_retheme(old)
+		baseRetheme(self,old)
+		local ui=self._uiUI
+		if ui then ui.refreshAll(); self:_uiStatus() end
+	end
+	local baseCreate=Library.CreateWindow
+	function Library:CreateWindow(...)
+		local win=baseCreate(self,...)
+		if type(win)=="table" and win.Main and not win._uiSet then
+			local ok,err=pcall(win._uiInit,win)
+			if not ok then warn("[XevoraUI] P13 gagal diinisialisasi: "..tostring(err)) end
+		end
+		return win
+	end
+end
+--// ===== SELESAI P13 =====
+
 return Library
