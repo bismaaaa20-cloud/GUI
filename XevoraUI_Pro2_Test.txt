@@ -1,4 +1,4 @@
-XEVORAUI PRO2 — SCRIPT TES v5 (46 TES OTOMATIS)
+XEVORAUI PRO2 — SCRIPT TES v6 (52 PEMERIKSAAN OTOMATIS)
 Jalankan terpisah di Delta. Jangan tempel ke Main UI.
 
 --// ===== MULAI TES =====
@@ -50,7 +50,7 @@ end
 local hasil = win:AddTab({ Name = "Hasil", Icon = "check" })
 stats = hasil:AddStats({ { Value = "0", Label = "Lulus" }, { Value = "0", Label = "Gagal" }, { Value = "0", Label = "Lewat" } })
 ringT = hasil:AddRing({ Name = "Tingkat lulus", Value = 0, Max = 100 })
-hasil:AddButton({ Name = "Jalankan tes otomatis", Desc = "Semua paket P0 sampai P10", Text = "Mulai", Callback = function() runTests() end })
+hasil:AddButton({ Name = "Jalankan tes otomatis", Desc = "Semua paket P0 sampai P13", Text = "Mulai", Callback = function() runTests() end })
 con = hasil:AddConsole({ Name = "Log tes", Height = 220 })
 hasil:AddToggle({ Name = "Pemicu error (uji)", Desc = "Callback sengaja error", Flag = "t_err", Callback = function(v) if v then error("galat uji disengaja") end end })
 
@@ -586,6 +586,59 @@ runTests = function()
 		local c = Library:CheckCompatibility()
 		assert(type(c) == "table", "hasil bukan tabel")
 		out("Executor: " .. tostring(c.Executor) .. " | tidak didukung: " .. ((c.Unsupported and #c.Unsupported > 0) and table.concat(c.Unsupported, ", ") or "-"))
+	end)
+
+
+	check("P13 mode setting: buka dan tutup", function()
+		assert(type(win.OpenUISettings)=="function" and type(win.IsUISettings)=="function","API P13 tidak ada")
+		win:OpenUISettings("design")
+		assert(win:IsUISettings(),"mode tidak aktif")
+		local root=win.Main:FindFirstChild("XSetMode")
+		assert(root and root.Visible,"panel setting tidak terlihat")
+		win:CloseUISettings()
+		assert(not win:IsUISettings() and root.Visible==false,"mode tidak tertutup")
+	end)
+	check("P13 empat halaman dibangun satu kali", function()
+		win:OpenUISettings("design")
+		for _,cat in ipairs({"design","look","behav","data"}) do
+			win:OpenUISettings(cat)
+			assert(win._uiUI.pages[cat] and win._uiUI.pages[cat].Visible,"halaman hilang: "..cat)
+		end
+		local n=#(Library._gest or {})
+		for _=1,10 do
+			for _,cat in ipairs({"design","look","behav","data"}) do win:OpenUISettings(cat) end
+		end
+		assert(#(Library._gest or {})==n,"gesture bertambah saat berpindah halaman")
+		win:CloseUISettings()
+	end)
+	check("P13 autosave setting: antrean dan simpan manual", function()
+		win:SetUIAutosave(true)
+		win:SetBlur(0)
+		win:SetUIAutosave(false)
+		win:SetBlur(7)
+		assert(win._uiSet.pendN>0,"perubahan tidak masuk antrean")
+		win:SaveUISettings()
+		assert(win._uiSet.pendN==0,"antrean belum kosong")
+		assert(win:_load("blur",nil)==7,"nilai blur belum disimpan")
+		win:SetUIAutosave(false)
+		win:SetUIAutosave(true)
+		assert(win._uiSet.pend.uiauto==nil,"nilai autosave lama masih tertahan")
+		assert(win:_load("uiauto",nil)==true,"status autosave tidak tersimpan sebagai aktif")
+		win:SetBlur(0)
+	end)
+	check("P13 ekspor impor XU1 dan validasi kode rusak", function()
+		win:SetBlur(0)
+		local code=win:ExportUISettings()
+		assert(type(code)=="string" and code:sub(1,4)=="XU1:","format ekspor salah")
+		win:SetBlur(5)
+		assert(win:ImportUISettings(code)==true,"impor kode sah gagal")
+		assert((win._blur or 0)==0,"nilai tidak dipulihkan")
+		for _,bad in ipairs({"","abc","XU1:{","XU1:"}) do
+			assert(win:ImportUISettings(bad)==false,"kode rusak diterima: "..bad)
+		end
+		local odd='{"blur":1e999,"ts":-5,"trP":"x","sb":"zzz","scale":0}'
+		assert(pcall(win.ImportUISettings,win,"XU1:"..odd),"nilai ekstrem membuat error")
+		assert((win._blur or 0)>=0 and (win._blur or 0)<=24,"blur di luar batas")
 	end)
 
 	local total = P + F + S
