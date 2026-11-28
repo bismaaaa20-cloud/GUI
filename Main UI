@@ -9353,7 +9353,7 @@ do
 	end
 	function Window:ResetUISettings()
 		self:ResetDesign()
-		applyState(self,{theme="Dark Glass",trP=0.38,trC=0.45,trF=0.5,blur=0,ts=100,hc=false,rm=false,rgb=true,sb="full",locked=false,qon=true,hud=false,cfgAuto=false,scale=1})
+		applyState(self,{theme="Dark Glass",trP=0.38,trC=0.45,trF=0.5,blur=0,ts=100,hc=false,rm=false,sb="full",locked=false,scale=1})
 		self:_store("uiacc",false)
 		if self._uiUI then self._uiUI.refreshAll() end
 		return true
