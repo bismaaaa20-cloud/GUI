@@ -9589,6 +9589,9 @@ do
 		local sc=self:_load("uisc",nil); if num(sc,0.5,1.5) then pcall(self.SetScale,self,sc) end
 		local rg=self:_load("uirgb",nil); if type(rg)=="boolean" then pcall(self.SetRGB,self,rg) end
 		S.quiet=false
+		if type(self.AddCommand)=="function" then
+			self:AddCommand({Name=Library:T("uiSet"),Desc=Library:T("setMode"),Keywords="settings pengaturan mode",Callback=function() self:OpenUISettings() end})
+		end
 	end
 	local baseRetheme=Window._retheme
 	function Window:_retheme(old)
