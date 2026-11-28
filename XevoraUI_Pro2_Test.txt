@@ -1,4 +1,4 @@
-XEVORAUI PRO2 — SCRIPT TES v5 (46 TES OTOMATIS)
+XEVORAUI PRO2 — SCRIPT TES v6 (52 PEMERIKSAAN OTOMATIS)
 Jalankan terpisah di Delta. Jangan tempel ke Main UI.
 
 --// ===== MULAI TES =====
@@ -50,7 +50,7 @@ end
 local hasil = win:AddTab({ Name = "Hasil", Icon = "check" })
 stats = hasil:AddStats({ { Value = "0", Label = "Lulus" }, { Value = "0", Label = "Gagal" }, { Value = "0", Label = "Lewat" } })
 ringT = hasil:AddRing({ Name = "Tingkat lulus", Value = 0, Max = 100 })
-hasil:AddButton({ Name = "Jalankan tes otomatis", Desc = "Semua paket P0 sampai P10", Text = "Mulai", Callback = function() runTests() end })
+hasil:AddButton({ Name = "Jalankan tes otomatis", Desc = "Semua paket P0 sampai P13", Text = "Mulai", Callback = function() runTests() end })
 con = hasil:AddConsole({ Name = "Log tes", Height = 220 })
 hasil:AddToggle({ Name = "Pemicu error (uji)", Desc = "Callback sengaja error", Flag = "t_err", Callback = function(v) if v then error("galat uji disengaja") end end })
 
