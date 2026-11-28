@@ -9288,6 +9288,10 @@ do
 		local S = self._uiSet
 		if not S then return false end
 		S.auto = on ~= false
+		if S.auto and S.pend.uiauto ~= nil then
+			S.pend.uiauto = nil
+			S.pendN = math.max(0, S.pendN - 1)
+		end
 		self:_store("uiauto", S.auto)
 		if S.auto then self:SaveUISettings() else self:_uiStatus() end
 		return true
